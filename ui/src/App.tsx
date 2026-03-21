@@ -1,6 +1,6 @@
-import { useState, startTransition } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { APP_NAME, CHAT_API_PATHS, type Channel, type Notification } from "@paperclip-chat/shared";
+import { useEffect, useState, startTransition } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { APP_NAME, CHAT_API_PATHS, type Channel, type Notification, type Turn } from "@paperclip-chat/shared";
 import {
   BellRing,
   ChevronRight,
@@ -15,6 +15,7 @@ export function App() {
   const [selectedChannelId, setSelectedChannelId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [optimisticMessages, setOptimisticMessages] = useState<Record<string, ThreadEntry[]>>({});
+  const [sessionIdsByChannel, setSessionIdsByChannel] = useState<Record<string, string>>({});
   const healthQuery = useQuery({
     queryKey: ["health"],
     queryFn: async () => requestJson<{ status: string; paperclip: string; ws: string }>("/api/health"),
@@ -38,11 +39,50 @@ export function App() {
     channels.find((channel) => channel.id === selectedChannelId) ??
     channels[0] ??
     null;
+  const selectedSessionId = selectedChannel ? sessionIdsByChannel[selectedChannel.id] ?? null : null;
   const notifications = notificationsQuery.data?.notifications ?? demoNotifications;
   const usingFallbackChannels = !companyId || channelsQuery.isError || channels.length === 0;
   const unauthenticatedNotifications = notificationsQuery.isError;
   const draftLength = draft.length;
-  const previewEntries = buildThreadPreview(selectedChannel, optimisticMessages[selectedChannel?.id ?? ""] ?? []);
+  const openSessionMutation = useMutation({
+    mutationFn: async (channel: Channel) =>
+      requestJson<{ session: { id: string } }>(CHAT_API_PATHS.SESSIONS, {
+        method: "POST",
+        body: JSON.stringify({
+          channelId: channel.id,
+          participantIds: [],
+        }),
+      }),
+    onSuccess: (result, channel) => {
+      setSessionIdsByChannel((current) => ({
+        ...current,
+        [channel.id]: result.session.id,
+      }));
+    },
+  });
+  const messagesQuery = useQuery({
+    queryKey: ["messages", selectedChannel?.id, selectedSessionId],
+    enabled: Boolean(selectedChannel && selectedSessionId),
+    queryFn: async () =>
+      requestJson<{ turns: Turn[] }>(
+        `${CHAT_API_PATHS.CHANNEL_MESSAGES(selectedChannel!.id)}?sessionId=${encodeURIComponent(selectedSessionId!)}`,
+      ),
+  });
+
+  useEffect(() => {
+    if (!selectedChannel || usingFallbackChannels || sessionIdsByChannel[selectedChannel.id] || openSessionMutation.isPending) {
+      return;
+    }
+
+    openSessionMutation.mutate(selectedChannel);
+  }, [openSessionMutation, selectedChannel, sessionIdsByChannel, usingFallbackChannels]);
+
+  const liveEntries = (messagesQuery.data?.turns ?? []).map(mapTurnToEntry);
+  const previewEntries = buildThreadPreview(
+    selectedChannel,
+    optimisticMessages[selectedChannel?.id ?? ""] ?? [],
+    liveEntries,
+  );
 
   return (
     <main className="min-h-screen bg-stone-100 text-neutral-950">
@@ -148,17 +188,23 @@ export function App() {
                   </h2>
                   <p className="mt-2 max-w-3xl text-sm leading-6 text-stone-600">
                     Transcript-style chat surface aligned with Paperclip’s run and inbox patterns.
-                    Session send/history routes are live; subprocess and agent presence wiring are next.
+                    Session history hydrates from the backend when a live channel context is available.
+                    Composer send and realtime subscriptions are next.
                   </p>
                 </div>
                 <div className="flex items-center gap-2 text-xs font-medium text-stone-500">
                   <Sparkles className="h-4 w-4 text-amber-500" />
-                  Live shell
+                  {selectedSessionId ? `session ${selectedSessionId.slice(0, 8)}…` : "live shell"}
                 </div>
               </div>
             </div>
 
             <div className="flex-1 space-y-4 overflow-y-auto px-6 py-5">
+              {!usingFallbackChannels && !selectedSessionId ? (
+                <article className="rounded-3xl border border-dashed border-stone-300 bg-stone-50 px-4 py-4 text-sm text-stone-500">
+                  Opening a session for this channel…
+                </article>
+              ) : null}
               {previewEntries.map((entry) => (
                 <article key={entry.id} className="rounded-3xl border border-stone-200 bg-stone-50/70 px-4 py-4">
                   <div className="flex items-center justify-between gap-4">
@@ -219,7 +265,9 @@ export function App() {
                 </label>
                 <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <p className="text-sm leading-6 text-stone-500">
-                    Optimistic local composer shell. Server-backed send is the next UI integration slice.
+                    {selectedSessionId
+                      ? "Live session selected. This composer is still optimistic-only until send mutation wiring lands."
+                      : "Composer is optimistic-only until a live session is opened for the selected channel."}
                   </p>
                   <div className="flex items-center gap-3">
                     <span className="text-xs font-medium text-stone-500">{draftLength}/10000</span>
@@ -293,9 +341,13 @@ function StatusPill(props: { label: string; value: string; tone: "green" | "ambe
   );
 }
 
-function buildThreadPreview(channel: Channel | null, optimisticEntries: ThreadEntry[]) {
+function buildThreadPreview(channel: Channel | null, optimisticEntries: ThreadEntry[], liveEntries: ThreadEntry[]) {
   if (!channel) {
     return [];
+  }
+
+  if (liveEntries.length > 0) {
+    return [...liveEntries, ...optimisticEntries];
   }
 
   return [
@@ -345,6 +397,16 @@ function renderNotificationBody(notification: Notification) {
   return "A new update is waiting in the chat queue.";
 }
 
+function mapTurnToEntry(turn: Turn): ThreadEntry {
+  return {
+    id: turn.id,
+    author: `Participant ${turn.fromParticipantId.slice(0, 6)}`,
+    kind: turn.fromParticipantId.startsWith("agent") ? "agent" : "human",
+    timestamp: new Date(turn.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    body: turn.content,
+  };
+}
+
 function readCompanyId() {
   if (typeof window === "undefined") {
     return null;
@@ -354,11 +416,14 @@ function readCompanyId() {
   return params.get("companyId");
 }
 
-async function requestJson<T>(path: string): Promise<T> {
+async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
+    ...init,
     credentials: "include",
     headers: {
       Accept: "application/json",
+      ...(init?.body ? { "Content-Type": "application/json" } : {}),
+      ...(init?.headers ?? {}),
     },
   });
 
