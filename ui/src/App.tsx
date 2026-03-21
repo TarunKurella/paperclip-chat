@@ -107,6 +107,63 @@ export function App() {
     liveEntries,
   );
 
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const socket = new WebSocket(buildChatWsUrl(window.location));
+    let activeChannelId: string | null = null;
+
+    socket.addEventListener("open", () => {
+      if (selectedChannel?.id) {
+        activeChannelId = selectedChannel.id;
+        socket.send(JSON.stringify({ type: "subscribe", channelId: selectedChannel.id }));
+      }
+    });
+
+    socket.addEventListener("message", (event) => {
+      const envelope = parseWsEnvelope(event.data);
+      if (!envelope) {
+        return;
+      }
+
+      if (envelope.type === "chat.message") {
+        const turn = readTurnPayload(envelope.payload);
+        if (!turn || !selectedChannel || !selectedSessionId || activeChannelId !== selectedChannel.id) {
+          return;
+        }
+
+        queryClient.setQueryData<{ turns: Turn[] }>(
+          ["messages", selectedChannel.id, selectedSessionId],
+          (current) => ({
+            turns: dedupeTurns([...(current?.turns ?? []), turn]),
+          }),
+        );
+        setOptimisticMessages((current) => ({
+          ...current,
+          [selectedChannel.id]: (current[selectedChannel.id] ?? []).filter((entry) => entry.body !== turn.content),
+        }));
+        return;
+      }
+
+      if (envelope.type === "notification.new") {
+        const notification = readNotificationPayload(envelope.payload);
+        if (!notification) {
+          return;
+        }
+
+        queryClient.setQueryData<{ notifications: Notification[] }>(["notifications"], (current) => ({
+          notifications: dedupeNotifications([notification, ...(current?.notifications ?? [])]),
+        }));
+      }
+    });
+
+    return () => {
+      socket.close();
+    };
+  }, [queryClient, selectedChannel, selectedSessionId]);
+
   return (
     <main className="min-h-screen bg-stone-100 text-neutral-950">
       <div className="mx-auto flex min-h-screen max-w-[1600px] flex-col px-4 py-4 lg:px-6">
@@ -427,6 +484,17 @@ function dedupeTurns(turns: Turn[]) {
   });
 }
 
+function dedupeNotifications(notifications: Notification[]) {
+  const seen = new Set<string>();
+  return notifications.filter((notification) => {
+    if (seen.has(notification.id)) {
+      return false;
+    }
+    seen.add(notification.id);
+    return true;
+  });
+}
+
 interface ThreadEntry {
   id: string;
   author: string;
@@ -472,6 +540,83 @@ function readCompanyId() {
 
   const params = new URLSearchParams(window.location.search);
   return params.get("companyId");
+}
+
+function buildChatWsUrl(location: Location) {
+  const url = new URL("/ws", location.href);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  return url.toString();
+}
+
+function parseWsEnvelope(value: unknown): { type: string; payload: unknown } | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(value) as { type?: unknown; payload?: unknown };
+    return typeof parsed.type === "string" ? { type: parsed.type, payload: parsed.payload } : null;
+  } catch {
+    return null;
+  }
+}
+
+function readTurnPayload(value: unknown): Turn | null {
+  if (!isRecord(value) || !isRecord(value.turn)) {
+    return null;
+  }
+
+  const turn = value.turn as Record<string, unknown>;
+  return typeof turn.id === "string" &&
+    typeof turn.sessionId === "string" &&
+    typeof turn.seq === "number" &&
+    typeof turn.fromParticipantId === "string" &&
+    typeof turn.content === "string" &&
+    typeof turn.tokenCount === "number" &&
+    typeof turn.summarize === "boolean" &&
+    typeof turn.isDecision === "boolean" &&
+    typeof turn.createdAt === "string"
+    ? {
+        id: turn.id,
+        sessionId: turn.sessionId,
+        seq: turn.seq,
+        fromParticipantId: turn.fromParticipantId,
+        content: turn.content,
+        tokenCount: turn.tokenCount,
+        summarize: turn.summarize,
+        mentionedIds: Array.isArray(turn.mentionedIds) ? turn.mentionedIds.filter((item): item is string => typeof item === "string") : null,
+        isDecision: turn.isDecision,
+        createdAt: turn.createdAt,
+      }
+    : null;
+}
+
+function readNotificationPayload(value: unknown): Notification | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  return typeof value.id === "string" &&
+    typeof value.userId === "string" &&
+    typeof value.companyId === "string" &&
+    typeof value.type === "string" &&
+    isRecord(value.payload) &&
+    (typeof value.readAt === "string" || value.readAt === null) &&
+    typeof value.createdAt === "string"
+    ? {
+        id: value.id,
+        userId: value.userId,
+        companyId: value.companyId,
+        type: value.type as Notification["type"],
+        payload: value.payload,
+        readAt: value.readAt,
+        createdAt: value.createdAt,
+      }
+    : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
