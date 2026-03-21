@@ -34,6 +34,14 @@ hooks:
     if [ ! -e .git ]; then
       git -C "$repo_root" worktree add --force --detach "$PWD" HEAD
     fi
+    tmp_archive="$(mktemp "${TMPDIR:-/tmp}/paperclip-workspace-sync.XXXXXX.tar")"
+    tar -C "$repo_root" \
+      --exclude=.git \
+      --exclude=.claude \
+      --exclude=.paperclip/workspaces \
+      -cf "$tmp_archive" .
+    tar -C "$PWD" -xf "$tmp_archive"
+    rm -f "$tmp_archive"
     mkdir -p .paperclip-artifacts .paperclip-notes
     if [ ! -e .git ]; then
       echo "warning: workspace does not appear to be a git checkout" >&2
