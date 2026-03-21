@@ -1,12 +1,15 @@
-import { CHAT_DEFAULTS, CHAT_EVENT_TYPES, type AgentChannelState, type ChatSession, type Turn } from "@paperclip-chat/shared";
+import { CHAT_DEFAULTS, CHAT_EVENT_TYPES, type AgentChannelState, type ChatSession, type Notification, type Turn } from "@paperclip-chat/shared";
 import type { TrunkManager } from "../context/TrunkManager.js";
 import type { PaperclipClient } from "../adapters/paperclipClient.js";
 
 export interface NotificationRecord {
+  id?: string;
   userId: string;
   companyId: string;
   type: "unread_message" | "agent_initiated" | "decision_pending";
   payload: Record<string, unknown>;
+  readAt?: string | null;
+  createdAt?: string;
 }
 
 export interface SessionParticipant {
@@ -29,11 +32,14 @@ export interface SessionRepository {
 }
 
 export interface NotificationRepository {
-  create(notification: NotificationRecord): Promise<void>;
+  create(notification: NotificationRecord): Promise<Notification>;
+  listUnread(userId: string): Promise<Notification[]>;
+  markRead(userId: string, notificationIds?: string[]): Promise<void>;
 }
 
 export interface SessionHub {
   broadcast(channelId: string, event: { type: string; payload: unknown }): void;
+  broadcastToUser(userId: string, event: { type: string; payload: unknown }): void;
   isUserConnected(userId: string): boolean;
 }
 
@@ -143,6 +149,14 @@ export class SessionManager {
     });
   }
 
+  async listNotifications(userId: string): Promise<Notification[]> {
+    return this.notifications.listUnread(userId);
+  }
+
+  async markNotificationsRead(userId: string, notificationIds?: string[]): Promise<void> {
+    await this.notifications.markRead(userId, notificationIds);
+  }
+
   async processTurn(input: ProcessTurnInput): Promise<Turn> {
     const session = await this.repository.getSession(input.sessionId);
     if (!session) {
@@ -211,16 +225,23 @@ export class SessionManager {
 
     await Promise.all(
       offlineHumans.map((participant) =>
-        this.notifications.create({
-          userId: participant.participantId,
-          companyId: participant.companyId,
-          type: "unread_message",
-          payload: {
-            sessionId: session.id,
-            channelId: session.channelId,
-            turnId: turn.id,
-          },
-        }),
+        this.notifications
+          .create({
+            userId: participant.participantId,
+            companyId: participant.companyId,
+            type: "unread_message",
+            payload: {
+              sessionId: session.id,
+              channelId: session.channelId,
+              turnId: turn.id,
+            },
+          })
+          .then((notification) => {
+            this.hub.broadcastToUser(participant.participantId, {
+              type: CHAT_EVENT_TYPES.NOTIFICATION_NEW,
+              payload: notification,
+            });
+          }),
       ),
     );
   }

@@ -13,6 +13,7 @@ import { DbChannelRepository } from "./channels/repository.js";
 import { InMemoryChannelRepository } from "./channels/memoryRepository.js";
 import { TrunkManager } from "./context/TrunkManager.js";
 import { createServerDatabase } from "./db/client.js";
+import { notificationRoutes } from "./notifications/routes.js";
 import { DebounceBuffer } from "./session/Debounce.js";
 import { InMemorySessionRepository } from "./session/memoryRepository.js";
 import { SessionManager } from "./session/SessionManager.js";
@@ -92,7 +93,13 @@ export async function bootstrapServer(envSource: NodeJS.ProcessEnv = process.env
       requireAny: requireAnyMiddleware,
     }),
   );
-  app.use("/api/notifications", authenticateMiddleware, requireHumanMiddleware, notImplementedRouter("notifications"));
+  app.use(
+    "/api",
+    notificationRoutes(sessionManager, {
+      authenticate: authenticateMiddleware,
+      requireHuman: requireHumanMiddleware,
+    }),
+  );
 
   const staticDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../ui/dist");
   app.use(express.static(staticDir));
@@ -132,12 +139,4 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   runtime.server.listen(port, () => {
     console.log(`paperclip-chat server listening on http://127.0.0.1:${port}`);
   });
-}
-
-function notImplementedRouter(resource: string): Express {
-  const app = express();
-  app.use((_req, res) => {
-    res.status(501).json({ error: `${resource} routes not implemented yet` });
-  });
-  return app;
 }

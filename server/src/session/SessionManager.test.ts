@@ -76,18 +76,17 @@ describe("SessionManager", () => {
       mentionedIds: [],
     });
 
-    expect(fixture.notifications).toEqual<NotificationRecord[]>([
-      {
-        userId: "human-2",
-        companyId: "company-1",
-        type: "unread_message",
-        payload: {
-          sessionId: "session-1",
-          channelId: "channel-1",
-          turnId: "turn-1",
-        },
+    expect(fixture.notifications).toHaveLength(1);
+    expect(fixture.notifications[0]).toMatchObject<Partial<NotificationRecord>>({
+      userId: "human-2",
+      companyId: "company-1",
+      type: "unread_message",
+      payload: {
+        sessionId: "session-1",
+        channelId: "channel-1",
+        turnId: "turn-1",
       },
-    ]);
+    });
   });
 
   it("enqueues chunk work when token window is crossed", async () => {
@@ -184,12 +183,25 @@ function createFixture(overrides: Partial<FixtureOptions> = {}) {
   };
   const hub = {
     broadcast: vi.fn(),
+    broadcastToUser: vi.fn(),
     isUserConnected: vi.fn((userId: string) => connectedUsers.has(userId)),
   };
   const notificationsRepo = {
     create: vi.fn(async (notification: NotificationRecord) => {
-      notifications.push(notification);
+      const created = {
+        id: notification.id ?? "notification-1",
+        userId: notification.userId,
+        companyId: notification.companyId,
+        type: notification.type,
+        payload: notification.payload,
+        readAt: null,
+        createdAt: new Date("2026-03-21T00:00:00.000Z").toISOString(),
+      };
+      notifications.push(created);
+      return created;
     }),
+    listUnread: vi.fn().mockResolvedValue(notifications),
+    markRead: vi.fn().mockResolvedValue(undefined),
   };
   const debounce = {
     enqueue: vi.fn(),

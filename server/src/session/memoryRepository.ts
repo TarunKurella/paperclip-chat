@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { CHAT_DEFAULTS, type AgentChannelState, type ChatSession, type Turn } from "@paperclip-chat/shared";
+import { CHAT_DEFAULTS, type AgentChannelState, type ChatSession, type Notification, type Turn } from "@paperclip-chat/shared";
 import type { NotificationRecord, SessionParticipant, SessionRepository } from "./SessionManager.js";
 import type { TrunkStore } from "../context/TrunkManager.js";
 
@@ -9,7 +9,7 @@ export class InMemorySessionRepository implements SessionRepository, TrunkStore 
   private readonly channelParticipants = new Map<string, SessionParticipant[]>();
   private readonly agentStates = new Map<string, AgentChannelState[]>();
   private readonly turns = new Map<string, Turn[]>();
-  readonly notifications: NotificationRecord[] = [];
+  readonly notifications: Notification[] = [];
 
   seedChannelParticipants(channelId: string, participants: SessionParticipant[]): void {
     this.channelParticipants.set(channelId, participants);
@@ -98,8 +98,44 @@ export class InMemorySessionRepository implements SessionRepository, TrunkStore 
     );
   }
 
-  async create(notification: NotificationRecord): Promise<void> {
-    this.notifications.push(notification);
+  async create(notification: NotificationRecord): Promise<Notification> {
+    const createdNotification: Notification = {
+      id: notification.id ?? randomUUID(),
+      userId: notification.userId,
+      companyId: notification.companyId,
+      type: notification.type,
+      payload: notification.payload,
+      readAt: notification.readAt ?? null,
+      createdAt: notification.createdAt ?? new Date().toISOString(),
+    };
+
+    this.notifications.push(createdNotification);
+    return createdNotification;
+  }
+
+  async listUnread(userId: string): Promise<Notification[]> {
+    return this.notifications
+      .filter((notification) => notification.userId === userId && notification.readAt === null)
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  }
+
+  async markRead(userId: string, notificationIds?: string[]): Promise<void> {
+    const notificationSet = notificationIds ? new Set(notificationIds) : null;
+    for (let index = 0; index < this.notifications.length; index += 1) {
+      const notification = this.notifications[index];
+      if (!notification || notification.userId !== userId || notification.readAt !== null) {
+        continue;
+      }
+
+      if (notificationSet && !notificationSet.has(notification.id)) {
+        continue;
+      }
+
+      this.notifications[index] = {
+        ...notification,
+        readAt: new Date().toISOString(),
+      };
+    }
   }
 
   async insertTurnWithNextSeq(input: {
