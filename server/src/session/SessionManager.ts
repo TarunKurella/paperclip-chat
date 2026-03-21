@@ -20,6 +20,7 @@ export interface SessionRepository {
   closeSession(sessionId: string): Promise<ChatSession | null>;
   getSession(sessionId: string): Promise<ChatSession | null>;
   getTokensSinceLastChunk(sessionId: string): Promise<number>;
+  listTurns(sessionId: string, options?: { cursor?: number; limit?: number }): Promise<Turn[]>;
   listChannelParticipants(channelId: string): Promise<SessionParticipant[]>;
   listSessionParticipants(sessionId: string): Promise<SessionParticipant[]>;
   listAgentStates(sessionId: string): Promise<AgentChannelState[]>;
@@ -54,6 +55,11 @@ export interface ProcessTurnInput {
 export interface OpenSessionInput {
   channelId: string;
   participantIds: string[];
+}
+
+export interface SessionDetails {
+  session: ChatSession;
+  agentStates: AgentChannelState[];
 }
 
 export class SessionNotFoundError extends Error {
@@ -97,6 +103,16 @@ export class SessionManager {
     return session;
   }
 
+  async getSessionState(sessionId: string): Promise<SessionDetails> {
+    const session = await this.repository.getSession(sessionId);
+    if (!session) {
+      throw new SessionNotFoundError(sessionId);
+    }
+
+    const agentStates = await this.repository.listAgentStates(sessionId);
+    return { session, agentStates };
+  }
+
   async closeSession(sessionId: string): Promise<ChatSession> {
     const session = await this.repository.closeSession(sessionId);
     if (!session) {
@@ -109,6 +125,22 @@ export class SessionManager {
     });
 
     return session;
+  }
+
+  async getTokenUsage(sessionId: string): Promise<Turn[]> {
+    return this.listMessages(sessionId);
+  }
+
+  async listMessages(sessionId: string, cursor?: number): Promise<Turn[]> {
+    const session = await this.repository.getSession(sessionId);
+    if (!session) {
+      throw new SessionNotFoundError(sessionId);
+    }
+
+    return this.repository.listTurns(sessionId, {
+      cursor,
+      limit: 50,
+    });
   }
 
   async processTurn(input: ProcessTurnInput): Promise<Turn> {

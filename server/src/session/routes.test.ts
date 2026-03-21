@@ -9,6 +9,9 @@ describe("sessionRoutes", () => {
       openSession: vi.fn().mockResolvedValue({ id: "session-1", channelId: "11111111-1111-4111-8111-111111111111" }),
       processTurn: vi.fn(),
       closeSession: vi.fn(),
+      getSessionState: vi.fn(),
+      getTokenUsage: vi.fn(),
+      listMessages: vi.fn(),
     };
 
     const app = express();
@@ -33,6 +36,9 @@ describe("sessionRoutes", () => {
       openSession: vi.fn(),
       processTurn: vi.fn().mockResolvedValue({ id: "turn-1" }),
       closeSession: vi.fn(),
+      getSessionState: vi.fn(),
+      getTokenUsage: vi.fn(),
+      listMessages: vi.fn(),
     };
 
     const app = express();
@@ -58,6 +64,9 @@ describe("sessionRoutes", () => {
       openSession: vi.fn(),
       processTurn: vi.fn(),
       closeSession: vi.fn().mockResolvedValue({ id: "session-1", status: "closed" }),
+      getSessionState: vi.fn(),
+      getTokenUsage: vi.fn(),
+      listMessages: vi.fn(),
     };
 
     const app = express();
@@ -69,6 +78,71 @@ describe("sessionRoutes", () => {
 
     expect(response.status).toBe(200);
     expect(sessionManager.closeSession).toHaveBeenCalledWith("session-1");
+  });
+
+  it("returns session state", async () => {
+    const sessionManager = {
+      openSession: vi.fn(),
+      processTurn: vi.fn(),
+      closeSession: vi.fn(),
+      getSessionState: vi.fn().mockResolvedValue({ session: { id: "session-1" }, agentStates: [] }),
+      getTokenUsage: vi.fn(),
+      listMessages: vi.fn(),
+    };
+
+    const app = express();
+    app.use(express.json());
+    app.use(injectPrincipal());
+    app.use("/api", sessionRoutes(sessionManager as never));
+
+    const response = await request(app).get("/api/sessions/session-1");
+
+    expect(response.status).toBe(200);
+    expect(sessionManager.getSessionState).toHaveBeenCalledWith("session-1");
+  });
+
+  it("returns token usage for a session", async () => {
+    const sessionManager = {
+      openSession: vi.fn(),
+      processTurn: vi.fn(),
+      closeSession: vi.fn(),
+      getSessionState: vi.fn(),
+      getTokenUsage: vi.fn().mockResolvedValue([{ id: "turn-1", tokenCount: 4 }]),
+      listMessages: vi.fn(),
+    };
+
+    const app = express();
+    app.use(express.json());
+    app.use(injectPrincipal());
+    app.use("/api", sessionRoutes(sessionManager as never));
+
+    const response = await request(app).get("/api/sessions/session-1/tokens");
+
+    expect(response.status).toBe(200);
+    expect(sessionManager.getTokenUsage).toHaveBeenCalledWith("session-1");
+  });
+
+  it("returns message history with an optional cursor", async () => {
+    const sessionManager = {
+      openSession: vi.fn(),
+      processTurn: vi.fn(),
+      closeSession: vi.fn(),
+      getSessionState: vi.fn(),
+      getTokenUsage: vi.fn(),
+      listMessages: vi.fn().mockResolvedValue([{ id: "turn-2", seq: 2 }]),
+    };
+
+    const app = express();
+    app.use(express.json());
+    app.use(injectPrincipal());
+    app.use("/api", sessionRoutes(sessionManager as never));
+
+    const response = await request(app)
+      .get("/api/channels/channel-1/messages")
+      .query({ sessionId: "session-1", cursor: "1" });
+
+    expect(response.status).toBe(200);
+    expect(sessionManager.listMessages).toHaveBeenCalledWith("session-1", 1);
   });
 });
 

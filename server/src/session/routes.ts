@@ -11,7 +11,10 @@ export interface SessionRouteAuth {
 const passThrough: RequestHandler = (_req, _res, next) => next();
 
 export function sessionRoutes(
-  sessionManager: Pick<SessionManager, "openSession" | "processTurn" | "closeSession">,
+  sessionManager: Pick<
+    SessionManager,
+    "openSession" | "processTurn" | "closeSession" | "getSessionState" | "getTokenUsage" | "listMessages"
+  >,
   auth: SessionRouteAuth = {},
 ): ExpressRouter {
   const router = Router();
@@ -51,6 +54,30 @@ export function sessionRoutes(
     },
   );
 
+  router.get("/sessions/:id", auth.authenticate ?? passThrough, auth.requireAny ?? passThrough, async (req, res) => {
+    const sessionId = readParam(req.params.id);
+    const state = await sessionManager.getSessionState(sessionId);
+    res.json(state);
+  });
+
+  router.get("/sessions/:id/tokens", auth.authenticate ?? passThrough, auth.requireAny ?? passThrough, async (req, res) => {
+    const sessionId = readParam(req.params.id);
+    const turns = await sessionManager.getTokenUsage(sessionId);
+    res.json({ turns });
+  });
+
+  router.get(
+    "/channels/:id/messages",
+    auth.authenticate ?? passThrough,
+    auth.requireAny ?? passThrough,
+    async (req, res) => {
+      const sessionId = readParam(req.query.sessionId);
+      const cursor = req.query.cursor ? Number(readParam(req.query.cursor)) : undefined;
+      const turns = await sessionManager.listMessages(sessionId, cursor);
+      res.json({ turns });
+    },
+  );
+
   return router;
 }
 
@@ -62,9 +89,13 @@ function getSenderId(req: AuthenticatedRequest): string {
   return req.principal.id;
 }
 
-function readParam(value: string | string[] | undefined): string {
+function readParam(value: unknown): string {
   if (typeof value === "string") {
     return value;
+  }
+
+  if (Array.isArray(value) && typeof value[0] === "string") {
+    return value[0];
   }
 
   throw new Error("Missing route parameter");

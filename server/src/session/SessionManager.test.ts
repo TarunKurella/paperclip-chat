@@ -175,6 +175,7 @@ function createFixture(overrides: Partial<FixtureOptions> = {}) {
     closeSession: vi.fn().mockResolvedValue(session),
     getSession: vi.fn().mockResolvedValue(session),
     getTokensSinceLastChunk: vi.fn().mockResolvedValue(overrides.tokensSinceLastChunk ?? 0),
+    listTurns: vi.fn().mockResolvedValue([turn]),
     listChannelParticipants: vi.fn().mockResolvedValue(participants),
     listSessionParticipants: vi.fn().mockResolvedValue(participants),
     listAgentStates: vi.fn().mockResolvedValue(agentStates),

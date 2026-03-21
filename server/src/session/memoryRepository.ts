@@ -49,6 +49,13 @@ export class InMemorySessionRepository implements SessionRepository, TrunkStore 
     return (this.turns.get(sessionId) ?? []).reduce((total, turn) => total + turn.tokenCount, 0);
   }
 
+  async listTurns(sessionId: string, options: { cursor?: number; limit?: number } = {}): Promise<Turn[]> {
+    const { cursor, limit = 50 } = options;
+    const turns = this.turns.get(sessionId) ?? [];
+    const filtered = cursor === undefined ? turns : turns.filter((turn) => turn.seq > cursor);
+    return filtered.slice(0, limit);
+  }
+
   async listChannelParticipants(channelId: string): Promise<SessionParticipant[]> {
     return [...(this.channelParticipants.get(channelId) ?? [])];
   }
