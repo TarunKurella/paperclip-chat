@@ -38,7 +38,10 @@ describe("SessionManager", () => {
     });
 
     expect(session.id).toBe("session-1");
-    expect(fixture.repository.createSession).toHaveBeenCalledWith("channel-1");
+    expect(fixture.repository.createSession).toHaveBeenCalledWith("channel-1", [
+      { participantId: "human-1", participantType: "human", companyId: "company-1" },
+      { participantId: "agent-2", participantType: "agent", companyId: "company-1" },
+    ]);
     expect(fixture.repository.createAgentStates).toHaveBeenCalledWith("session-1", ["agent-2"]);
     expect(fixture.paperclipClient.getAgent).toHaveBeenCalledWith("agent-2");
   });
@@ -172,7 +175,8 @@ function createFixture(overrides: Partial<FixtureOptions> = {}) {
     closeSession: vi.fn().mockResolvedValue(session),
     getSession: vi.fn().mockResolvedValue(session),
     getTokensSinceLastChunk: vi.fn().mockResolvedValue(overrides.tokensSinceLastChunk ?? 0),
-    listParticipants: vi.fn().mockResolvedValue(participants),
+    listChannelParticipants: vi.fn().mockResolvedValue(participants),
+    listSessionParticipants: vi.fn().mockResolvedValue(participants),
     listAgentStates: vi.fn().mockResolvedValue(agentStates),
     createAgentStates: vi.fn().mockResolvedValue(undefined),
     incrementIdleTurnCount: vi.fn().mockResolvedValue(undefined),
@@ -193,7 +197,13 @@ function createFixture(overrides: Partial<FixtureOptions> = {}) {
     enqueue: vi.fn(),
   };
   const paperclipClient = {
-    getAgent: vi.fn().mockResolvedValue({ id: "agent-1", bootstrapPrompt: null }),
+    getAgent: vi.fn(async (agentId: string) => {
+      if (participants.some((participant) => participant.participantId === agentId && participant.participantType === "agent")) {
+        return { id: agentId, name: `Agent ${agentId}`, bootstrapPrompt: null };
+      }
+
+      throw new Error("agent not found");
+    }),
   };
 
   return {

@@ -16,11 +16,12 @@ export interface SessionParticipant {
 }
 
 export interface SessionRepository {
-  createSession(channelId: string): Promise<ChatSession>;
+  createSession(channelId: string, participants: SessionParticipant[]): Promise<ChatSession>;
   closeSession(sessionId: string): Promise<ChatSession | null>;
   getSession(sessionId: string): Promise<ChatSession | null>;
   getTokensSinceLastChunk(sessionId: string): Promise<number>;
-  listParticipants(channelId: string): Promise<SessionParticipant[]>;
+  listChannelParticipants(channelId: string): Promise<SessionParticipant[]>;
+  listSessionParticipants(sessionId: string): Promise<SessionParticipant[]>;
   listAgentStates(sessionId: string): Promise<AgentChannelState[]>;
   createAgentStates(sessionId: string, participantIds: string[]): Promise<void>;
   incrementIdleTurnCount(sessionId: string, participantIds: string[]): Promise<void>;
@@ -74,8 +75,8 @@ export class SessionManager {
   ) {}
 
   async openSession(input: OpenSessionInput): Promise<ChatSession> {
-    const session = await this.repository.createSession(input.channelId);
-    const participants = await this.repository.listParticipants(input.channelId);
+    const participants = await this.resolveParticipants(input.channelId, input.participantIds);
+    const session = await this.repository.createSession(input.channelId, participants);
 
     const agentIds = participants
       .filter(
@@ -140,7 +141,7 @@ export class SessionManager {
       });
     }
 
-    const participants = await this.repository.listParticipants(session.channelId);
+    const participants = await this.repository.listSessionParticipants(input.sessionId);
     await this.notifyOfflineHumans(participants, session, turn, input.fromParticipantId);
 
     const agentStates = await this.repository.listAgentStates(input.sessionId);
@@ -189,6 +190,40 @@ export class SessionManager {
           },
         }),
       ),
+    );
+  }
+
+  private async resolveParticipants(channelId: string, participantIds: string[]): Promise<SessionParticipant[]> {
+    const knownParticipants = await this.repository.listChannelParticipants(channelId);
+    const byId = new Map(knownParticipants.map((participant) => [participant.participantId, participant]));
+    const fallbackCompanyId = knownParticipants[0]?.companyId ?? "unknown-company";
+
+    return Promise.all(
+      participantIds.map(async (participantId) => {
+        const knownParticipant = byId.get(participantId);
+        if (knownParticipant) {
+          return knownParticipant;
+        }
+
+        if (this.paperclipClient) {
+          try {
+            await this.paperclipClient.getAgent(participantId);
+            return {
+              participantId,
+              participantType: "agent" as const,
+              companyId: fallbackCompanyId,
+            };
+          } catch {
+            // Fall through to human classification when Paperclip has no matching agent.
+          }
+        }
+
+        return {
+          participantId,
+          participantType: "human" as const,
+          companyId: fallbackCompanyId,
+        };
+      }),
     );
   }
 }
