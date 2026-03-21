@@ -80,6 +80,9 @@ importers:
       '@paperclip-chat/shared':
         specifier: workspace:*
         version: link:../packages/shared
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
     devDependencies:
       '@types/node':
         specifier: ^24.6.0
