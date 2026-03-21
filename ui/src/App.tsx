@@ -34,6 +34,26 @@ export function App() {
     queryFn: async () => requestJson<{ notifications: Notification[] }>(CHAT_API_PATHS.NOTIFICATIONS),
     retry: false,
   });
+  const markNotificationsReadMutation = useMutation({
+    mutationFn: async (notificationIds?: string[]) =>
+      requestVoid(CHAT_API_PATHS.NOTIFICATIONS_READ, {
+        method: "POST",
+        body: JSON.stringify(notificationIds?.length ? { notificationIds } : {}),
+      }),
+    onSuccess: (_result, notificationIds) => {
+      queryClient.setQueryData<{ notifications: Notification[] }>(["notifications"], (current) => {
+        const existing = current?.notifications ?? [];
+        if (!notificationIds?.length) {
+          return { notifications: [] };
+        }
+
+        const cleared = new Set(notificationIds);
+        return {
+          notifications: existing.filter((notification) => !cleared.has(notification.id)),
+        };
+      });
+    },
+  });
 
   const channels = channelsQuery.data ?? demoChannels;
   const selectedChannel =
@@ -409,6 +429,18 @@ export function App() {
               ) : null}
             </div>
             <div className="space-y-3 px-4 py-4">
+              {!unauthenticatedNotifications && notifications.length > 0 ? (
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => markNotificationsReadMutation.mutate(notifications.map((notification) => notification.id))}
+                    disabled={markNotificationsReadMutation.isPending}
+                    className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-medium text-stone-700 transition hover:bg-stone-100 disabled:cursor-not-allowed disabled:text-stone-400"
+                  >
+                    {markNotificationsReadMutation.isPending ? "Clearing…" : "Mark all read"}
+                  </button>
+                </div>
+              ) : null}
               {notifications.map((notification) => (
                 <article key={notification.id} className="rounded-2xl border border-stone-200 bg-stone-50 px-4 py-4">
                   <div className="flex items-start justify-between gap-3">
@@ -423,6 +455,18 @@ export function App() {
                   <p className="mt-3 text-sm leading-6 text-stone-600">
                     {renderNotificationBody(notification)}
                   </p>
+                  {!unauthenticatedNotifications ? (
+                    <div className="mt-3 flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => markNotificationsReadMutation.mutate([notification.id])}
+                        disabled={markNotificationsReadMutation.isPending}
+                        className="rounded-full border border-stone-200 bg-white px-3 py-1.5 text-xs font-medium text-stone-700 transition hover:bg-stone-100 disabled:cursor-not-allowed disabled:text-stone-400"
+                      >
+                        Mark read
+                      </button>
+                    </div>
+                  ) : null}
                 </article>
               ))}
             </div>
@@ -635,6 +679,22 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   return response.json() as Promise<T>;
+}
+
+async function requestVoid(path: string, init?: RequestInit): Promise<void> {
+  const response = await fetch(path, {
+    ...init,
+    credentials: "include",
+    headers: {
+      Accept: "application/json",
+      ...(init?.body ? { "Content-Type": "application/json" } : {}),
+      ...(init?.headers ?? {}),
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Request failed: ${response.status}`);
+  }
 }
 
 const demoChannels: Channel[] = [
