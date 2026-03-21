@@ -23,6 +23,39 @@ describe("SessionManager", () => {
     expect(fixture.debounce.enqueue).toHaveBeenCalledWith("agent-1", "session-1", turn);
   });
 
+  it("opens a session and creates agent states for agent participants", async () => {
+    const fixture = createFixture({
+      participants: [
+        { participantId: "human-1", participantType: "human", companyId: "company-1" },
+        { participantId: "agent-1", participantType: "agent", companyId: "company-1" },
+        { participantId: "agent-2", participantType: "agent", companyId: "company-1" },
+      ],
+    });
+
+    const session = await fixture.manager.openSession({
+      channelId: "channel-1",
+      participantIds: ["human-1", "agent-2"],
+    });
+
+    expect(session.id).toBe("session-1");
+    expect(fixture.repository.createSession).toHaveBeenCalledWith("channel-1");
+    expect(fixture.repository.createAgentStates).toHaveBeenCalledWith("session-1", ["agent-2"]);
+    expect(fixture.paperclipClient.getAgent).toHaveBeenCalledWith("agent-2");
+  });
+
+  it("closes a session and emits a session.closed event", async () => {
+    const fixture = createFixture();
+
+    const session = await fixture.manager.closeSession("session-1");
+
+    expect(session.id).toBe("session-1");
+    expect(fixture.repository.closeSession).toHaveBeenCalledWith("session-1");
+    expect(fixture.hub.broadcast).toHaveBeenCalledWith("channel-1", {
+      type: CHAT_EVENT_TYPES.SESSION_CLOSED,
+      payload: { sessionId: "session-1" },
+    });
+  });
+
   it("creates notifications for offline humans only", async () => {
     const fixture = createFixture({
       participants: [
@@ -135,10 +168,13 @@ function createFixture(overrides: Partial<FixtureOptions> = {}) {
     insertTurn: vi.fn().mockResolvedValue(turn),
   };
   const repository = {
+    createSession: vi.fn().mockResolvedValue(session ?? makeSession()),
+    closeSession: vi.fn().mockResolvedValue(session),
     getSession: vi.fn().mockResolvedValue(session),
     getTokensSinceLastChunk: vi.fn().mockResolvedValue(overrides.tokensSinceLastChunk ?? 0),
     listParticipants: vi.fn().mockResolvedValue(participants),
     listAgentStates: vi.fn().mockResolvedValue(agentStates),
+    createAgentStates: vi.fn().mockResolvedValue(undefined),
     incrementIdleTurnCount: vi.fn().mockResolvedValue(undefined),
   };
   const hub = {
@@ -156,9 +192,12 @@ function createFixture(overrides: Partial<FixtureOptions> = {}) {
   const chunkQueue = {
     enqueue: vi.fn(),
   };
+  const paperclipClient = {
+    getAgent: vi.fn().mockResolvedValue({ id: "agent-1", bootstrapPrompt: null }),
+  };
 
   return {
-    manager: new SessionManager(trunkManager, repository, hub, notificationsRepo, debounce, chunkQueue),
+    manager: new SessionManager(trunkManager, repository, hub, notificationsRepo, debounce, chunkQueue, paperclipClient),
     trunkManager,
     repository,
     hub,
@@ -166,6 +205,7 @@ function createFixture(overrides: Partial<FixtureOptions> = {}) {
     debounce,
     chunkQueue,
     turn,
+    paperclipClient,
   };
 }
 

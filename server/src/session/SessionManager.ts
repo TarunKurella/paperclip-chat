@@ -1,5 +1,6 @@
 import { CHAT_DEFAULTS, CHAT_EVENT_TYPES, type AgentChannelState, type ChatSession, type Turn } from "@paperclip-chat/shared";
 import type { TrunkManager } from "../context/TrunkManager.js";
+import type { PaperclipClient } from "../adapters/paperclipClient.js";
 
 export interface NotificationRecord {
   userId: string;
@@ -15,10 +16,13 @@ export interface SessionParticipant {
 }
 
 export interface SessionRepository {
+  createSession(channelId: string): Promise<ChatSession>;
+  closeSession(sessionId: string): Promise<ChatSession | null>;
   getSession(sessionId: string): Promise<ChatSession | null>;
   getTokensSinceLastChunk(sessionId: string): Promise<number>;
   listParticipants(channelId: string): Promise<SessionParticipant[]>;
   listAgentStates(sessionId: string): Promise<AgentChannelState[]>;
+  createAgentStates(sessionId: string, participantIds: string[]): Promise<void>;
   incrementIdleTurnCount(sessionId: string, participantIds: string[]): Promise<void>;
 }
 
@@ -46,6 +50,11 @@ export interface ProcessTurnInput {
   mentionedIds: string[];
 }
 
+export interface OpenSessionInput {
+  channelId: string;
+  participantIds: string[];
+}
+
 export class SessionNotFoundError extends Error {
   constructor(sessionId: string) {
     super(`Chat session not found: ${sessionId}`);
@@ -61,7 +70,45 @@ export class SessionManager {
     private readonly notifications: NotificationRepository,
     private readonly debounce: AgentWakeupQueue,
     private readonly chunkQueue: ChunkQueue,
+    private readonly paperclipClient?: Pick<PaperclipClient, "getAgent">,
   ) {}
+
+  async openSession(input: OpenSessionInput): Promise<ChatSession> {
+    const session = await this.repository.createSession(input.channelId);
+    const participants = await this.repository.listParticipants(input.channelId);
+
+    const agentIds = participants
+      .filter(
+        (participant) =>
+          participant.participantType === "agent" &&
+          input.participantIds.includes(participant.participantId),
+      )
+      .map((participant) => participant.participantId);
+
+    if (this.paperclipClient) {
+      await Promise.all(agentIds.map((agentId) => this.paperclipClient!.getAgent(agentId)));
+    }
+
+    if (agentIds.length > 0) {
+      await this.repository.createAgentStates(session.id, agentIds);
+    }
+
+    return session;
+  }
+
+  async closeSession(sessionId: string): Promise<ChatSession> {
+    const session = await this.repository.closeSession(sessionId);
+    if (!session) {
+      throw new SessionNotFoundError(sessionId);
+    }
+
+    this.hub.broadcast(session.channelId, {
+      type: CHAT_EVENT_TYPES.SESSION_CLOSED,
+      payload: { sessionId: session.id },
+    });
+
+    return session;
+  }
 
   async processTurn(input: ProcessTurnInput): Promise<Turn> {
     const session = await this.repository.getSession(input.sessionId);
