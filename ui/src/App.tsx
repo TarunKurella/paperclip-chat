@@ -13,6 +13,8 @@ import {
 export function App() {
   const companyId = readCompanyId();
   const [selectedChannelId, setSelectedChannelId] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+  const [optimisticMessages, setOptimisticMessages] = useState<Record<string, ThreadEntry[]>>({});
   const healthQuery = useQuery({
     queryKey: ["health"],
     queryFn: async () => requestJson<{ status: string; paperclip: string; ws: string }>("/api/health"),
@@ -39,6 +41,8 @@ export function App() {
   const notifications = notificationsQuery.data?.notifications ?? demoNotifications;
   const usingFallbackChannels = !companyId || channelsQuery.isError || channels.length === 0;
   const unauthenticatedNotifications = notificationsQuery.isError;
+  const draftLength = draft.length;
+  const previewEntries = buildThreadPreview(selectedChannel, optimisticMessages[selectedChannel?.id ?? ""] ?? []);
 
   return (
     <main className="min-h-screen bg-stone-100 text-neutral-950">
@@ -155,7 +159,7 @@ export function App() {
             </div>
 
             <div className="flex-1 space-y-4 overflow-y-auto px-6 py-5">
-              {buildThreadPreview(selectedChannel).map((entry) => (
+              {previewEntries.map((entry) => (
                 <article key={entry.id} className="rounded-3xl border border-stone-200 bg-stone-50/70 px-4 py-4">
                   <div className="flex items-center justify-between gap-4">
                     <div className="flex items-center gap-3">
@@ -176,16 +180,59 @@ export function App() {
             </div>
 
             <div className="border-t border-stone-200 px-6 py-5">
-              <div className="rounded-[24px] border border-stone-200 bg-stone-50 px-4 py-4">
+              <form
+                className="rounded-[24px] border border-stone-200 bg-stone-50 px-4 py-4"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  if (!selectedChannel || !draft.trim()) {
+                    return;
+                  }
+
+                  const channelId = selectedChannel.id;
+                  const nextEntry: ThreadEntry = {
+                    id: `${channelId}-optimistic-${Date.now()}`,
+                    author: "Operator",
+                    kind: "human",
+                    timestamp: "now",
+                    body: draft.trim(),
+                  };
+
+                  setOptimisticMessages((current) => ({
+                    ...current,
+                    [channelId]: [...(current[channelId] ?? []), nextEntry],
+                  }));
+                  setDraft("");
+                }}
+              >
                 <div className="flex items-center gap-2 text-sm font-medium text-stone-700">
                   <Radio className="h-4 w-4 text-blue-500" />
-                  Composer wiring is next
+                  Message composer
                 </div>
-                <p className="mt-2 text-sm leading-6 text-stone-500">
-                  The backend session send route is live. This shell is ready for the next slice:
-                  composing a message, listing real turns, and subscribing to session updates.
-                </p>
-              </div>
+                <label className="mt-3 block">
+                  <span className="sr-only">Draft message</span>
+                  <textarea
+                    value={draft}
+                    onChange={(event) => setDraft(event.target.value)}
+                    placeholder="Write a message. Use @mentions to wake an agent in later slices."
+                    className="min-h-28 w-full resize-none rounded-2xl border border-stone-200 bg-white px-4 py-3 text-sm leading-6 text-stone-800 outline-none transition placeholder:text-stone-400 focus:border-stone-400"
+                  />
+                </label>
+                <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-sm leading-6 text-stone-500">
+                    Optimistic local composer shell. Server-backed send is the next UI integration slice.
+                  </p>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs font-medium text-stone-500">{draftLength}/10000</span>
+                    <button
+                      type="submit"
+                      disabled={!selectedChannel || draft.trim().length === 0}
+                      className="rounded-full bg-stone-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-stone-700 disabled:cursor-not-allowed disabled:bg-stone-300"
+                    >
+                      Send preview
+                    </button>
+                  </div>
+                </div>
+              </form>
             </div>
           </section>
 
@@ -246,7 +293,7 @@ function StatusPill(props: { label: string; value: string; tone: "green" | "ambe
   );
 }
 
-function buildThreadPreview(channel: Channel | null) {
+function buildThreadPreview(channel: Channel | null, optimisticEntries: ThreadEntry[]) {
   if (!channel) {
     return [];
   }
@@ -266,7 +313,16 @@ function buildThreadPreview(channel: Channel | null) {
       timestamp: "live",
       body: "Session routes, token counting, history pagination, and notifications are now wired. Composer send and realtime thread hydration are next.",
     },
+    ...optimisticEntries,
   ];
+}
+
+interface ThreadEntry {
+  id: string;
+  author: string;
+  kind: "human" | "agent";
+  timestamp: string;
+  body: string;
 }
 
 function renderNotificationTitle(notification: Notification) {
