@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "server",
+  "dolt_database": "paperclip_chat",
+  "project_id": "4b61e3c5-c88c-4496-937a-5c9b1eb31a2c"
+}
