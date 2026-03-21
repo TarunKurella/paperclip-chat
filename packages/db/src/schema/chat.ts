@@ -58,7 +58,7 @@ export const turns = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     sessionId: uuid("session_id").notNull().references(() => chatSessions.id, { onDelete: "cascade" }),
-    seq: integer("seq").generatedAlwaysAsIdentity(),
+    seq: integer("seq").notNull(),
     fromParticipantId: uuid("from_participant_id").notNull(),
     content: text("content").notNull(),
     tokenCount: integer("token_count").notNull(),
@@ -68,7 +68,7 @@ export const turns = pgTable(
     createdAt: timestamp("created_at", { withTimezone: false }).notNull().defaultNow(),
   },
   (table) => ({
-    sessionSeqIdx: index("turns_session_id_seq_idx").on(table.sessionId, table.seq),
+    sessionSeqIdx: uniqueIndex("turns_session_id_seq_idx").on(table.sessionId, table.seq),
   }),
 );
 
