@@ -1,5 +1,5 @@
 import { useEffect, useState, startTransition } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { APP_NAME, CHAT_API_PATHS, type Channel, type Notification, type Turn } from "@paperclip-chat/shared";
 import {
   BellRing,
@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 
 export function App() {
+  const queryClient = useQueryClient();
   const companyId = readCompanyId();
   const [selectedChannelId, setSelectedChannelId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -58,6 +59,28 @@ export function App() {
         ...current,
         [channel.id]: result.session.id,
       }));
+    },
+  });
+  const sendMessageMutation = useMutation({
+    mutationFn: async (input: { sessionId: string; channelId: string; text: string }) =>
+      requestJson<{ turn: Turn }>(CHAT_API_PATHS.SESSION_SEND(input.sessionId), {
+        method: "POST",
+        body: JSON.stringify({
+          text: input.text,
+          mentionedIds: [],
+        }),
+      }),
+    onSuccess: (result, variables) => {
+      setOptimisticMessages((current) => ({
+        ...current,
+        [variables.channelId]: [],
+      }));
+      queryClient.setQueryData<{ turns: Turn[] }>(
+        ["messages", variables.channelId, variables.sessionId],
+        (current) => ({
+          turns: dedupeTurns([...(current?.turns ?? []), result.turn]),
+        }),
+      );
     },
   });
   const messagesQuery = useQuery({
@@ -235,12 +258,17 @@ export function App() {
                   }
 
                   const channelId = selectedChannel.id;
+                  const nextDraft = draft.trim();
+                  if (!selectedSessionId) {
+                    return;
+                  }
+
                   const nextEntry: ThreadEntry = {
                     id: `${channelId}-optimistic-${Date.now()}`,
                     author: "Operator",
                     kind: "human",
                     timestamp: "now",
-                    body: draft.trim(),
+                    body: nextDraft,
                   };
 
                   setOptimisticMessages((current) => ({
@@ -248,6 +276,23 @@ export function App() {
                     [channelId]: [...(current[channelId] ?? []), nextEntry],
                   }));
                   setDraft("");
+
+                  sendMessageMutation.mutate(
+                    {
+                      sessionId: selectedSessionId,
+                      channelId,
+                      text: nextDraft,
+                    },
+                    {
+                      onError: () => {
+                        setOptimisticMessages((current) => ({
+                          ...current,
+                          [channelId]: (current[channelId] ?? []).filter((entry) => entry.id !== nextEntry.id),
+                        }));
+                        setDraft(nextDraft);
+                      },
+                    },
+                  );
                 }}
               >
                 <div className="flex items-center gap-2 text-sm font-medium text-stone-700">
@@ -266,17 +311,19 @@ export function App() {
                 <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <p className="text-sm leading-6 text-stone-500">
                     {selectedSessionId
-                      ? "Live session selected. This composer is still optimistic-only until send mutation wiring lands."
+                      ? sendMessageMutation.isPending
+                        ? "Sending message to the live session…"
+                        : "Live session selected. Messages post to the session API and stay optimistic until the turn returns."
                       : "Composer is optimistic-only until a live session is opened for the selected channel."}
                   </p>
                   <div className="flex items-center gap-3">
                     <span className="text-xs font-medium text-stone-500">{draftLength}/10000</span>
                     <button
                       type="submit"
-                      disabled={!selectedChannel || draft.trim().length === 0}
+                      disabled={!selectedChannel || !selectedSessionId || draft.trim().length === 0 || sendMessageMutation.isPending}
                       className="rounded-full bg-stone-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-stone-700 disabled:cursor-not-allowed disabled:bg-stone-300"
                     >
-                      Send preview
+                      {sendMessageMutation.isPending ? "Sending…" : "Send message"}
                     </button>
                   </div>
                 </div>
@@ -367,6 +414,17 @@ function buildThreadPreview(channel: Channel | null, optimisticEntries: ThreadEn
     },
     ...optimisticEntries,
   ];
+}
+
+function dedupeTurns(turns: Turn[]) {
+  const seen = new Set<string>();
+  return turns.filter((turn) => {
+    if (seen.has(turn.id)) {
+      return false;
+    }
+    seen.add(turn.id);
+    return true;
+  });
 }
 
 interface ThreadEntry {
