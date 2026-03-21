@@ -100,6 +100,16 @@ export class ChatWsHub {
     }
   }
 
+  isUserConnected(userId: string): boolean {
+    for (const state of this.clients.values()) {
+      if (state.principal.type === "human" && state.principal.id === userId) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   private register(socket: WebSocket, principal: Principal): void {
     this.logger.info(`WS client connected: ${principal.type}:${principal.id}`);
     this.clients.set(socket, {
