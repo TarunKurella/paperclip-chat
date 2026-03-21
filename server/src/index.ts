@@ -50,7 +50,7 @@ export async function bootstrapServer(envSource: NodeJS.ProcessEnv = process.env
     const subscription = new PaperclipWsSubscription({
       baseUrl: env.paperclipApiUrl,
       companyId: company.id,
-      serviceKey: env.chatServiceKey,
+      serviceKey: lifecycle.serviceAccount?.liveEventsToken ?? env.chatServiceKey,
     });
     subscription.start();
     return subscription;

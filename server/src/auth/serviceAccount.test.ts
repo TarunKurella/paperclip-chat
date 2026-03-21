@@ -22,10 +22,10 @@ describe("service account lifecycle", () => {
     vi.useRealTimers();
   });
 
-  it("registers and validates the paperclip-chat service account", async () => {
+  it("reuses an existing paperclip-chat service account", async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
-      .mockResolvedValueOnce(jsonResponse({ id: "svc-1", name: "paperclip-chat-server" }))
+      .mockResolvedValueOnce(jsonResponse([{ id: "company-1" }]))
       .mockResolvedValueOnce(jsonResponse([{ id: "svc-1", name: "paperclip-chat-server" }]));
 
     const result = await ensureServiceAccount(
@@ -34,15 +34,49 @@ describe("service account lifecycle", () => {
     );
 
     expect(result.name).toBe("paperclip-chat-server");
+    expect(result.companyId).toBe("company-1");
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
-      new URL("/api/agents", "http://localhost:3100"),
-      expect.objectContaining({ method: "POST" }),
+      new URL("/api/companies", "http://localhost:3100"),
+      expect.objectContaining({ headers: expect.objectContaining({ Authorization: "Bearer secret" }) }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
-      new URL("/api/agents", "http://localhost:3100"),
+      new URL("/api/companies/company-1/agents", "http://localhost:3100"),
       expect.objectContaining({ headers: expect.objectContaining({ Authorization: "Bearer secret" }) }),
+    );
+  });
+
+  it("registers the paperclip-chat service account when absent", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse([{ id: "company-1" }]))
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse([{ id: "company-1" }]))
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse({ id: "svc-1", name: "paperclip-chat-server" }, { status: 201 }))
+      .mockResolvedValueOnce(jsonResponse([{ id: "company-1" }]))
+      .mockResolvedValueOnce(jsonResponse([{ id: "svc-1", name: "paperclip-chat-server" }]));
+
+    const result = await ensureServiceAccount(
+      { paperclipApiUrl: "http://localhost:3100", chatServiceKey: "secret" },
+      fetchMock,
+    );
+
+    expect(result.name).toBe("paperclip-chat-server");
+    expect(result.companyId).toBe("company-1");
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      5,
+      new URL("/api/companies/company-1/agents", "http://localhost:3100"),
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          name: "paperclip-chat-server",
+          adapterType: "http",
+          role: "general",
+          adapterConfig: {},
+        }),
+      }),
     );
   });
 
@@ -50,8 +84,12 @@ describe("service account lifecycle", () => {
     vi.useFakeTimers();
     const fetchMock = vi
       .fn<typeof fetch>()
-      .mockResolvedValueOnce(jsonResponse({ id: "svc-1", name: "paperclip-chat-server" }))
-      .mockResolvedValue(jsonResponse([{ id: "svc-1", name: "paperclip-chat-server" }]));
+      .mockResolvedValueOnce(jsonResponse([{ id: "company-1" }]))
+      .mockResolvedValueOnce(jsonResponse([{ id: "svc-1", name: "paperclip-chat-server" }]))
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse({ id: "key-1", token: "pcp_live" }, { status: 201 }))
+      .mockResolvedValueOnce(jsonResponse([{ id: "company-1" }]))
+      .mockResolvedValueOnce(jsonResponse([{ id: "svc-1", name: "paperclip-chat-server" }]));
 
     const logger = { info: vi.fn(), warn: vi.fn() };
     const lifecycle = await startServiceAccountLifecycle(
@@ -64,7 +102,8 @@ describe("service account lifecycle", () => {
     stopServiceAccountLifecycle(lifecycle);
 
     expect(logger.info).toHaveBeenCalledWith("Service account validated: paperclip-chat-server");
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(lifecycle.serviceAccount?.liveEventsToken).toBe("pcp_live");
+    expect(fetchMock).toHaveBeenCalledTimes(6);
   });
 });
 
