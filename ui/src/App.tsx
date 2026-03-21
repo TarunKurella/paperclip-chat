@@ -1,13 +1,15 @@
 import { useEffect, useState, startTransition } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { APP_NAME, CHAT_API_PATHS, type Channel, type Notification, type Turn } from "@paperclip-chat/shared";
+import { APP_NAME, CHAT_API_PATHS, type AgentChannelState, type Channel, type ChatSession, type Notification, type Turn } from "@paperclip-chat/shared";
 import {
   BellRing,
   ChevronRight,
+  Lock,
   MessageSquareText,
   Radio,
   Sparkles,
   TriangleAlert,
+  X,
 } from "lucide-react";
 
 export function App() {
@@ -103,6 +105,30 @@ export function App() {
       );
     },
   });
+  const sessionStateQuery = useQuery({
+    queryKey: ["session", selectedSessionId],
+    enabled: Boolean(selectedSessionId),
+    queryFn: async () =>
+      requestJson<{ session: ChatSession; agentStates: AgentChannelState[] }>(
+        CHAT_API_PATHS.SESSION(selectedSessionId!),
+      ),
+  });
+  const closeSessionMutation = useMutation({
+    mutationFn: async (input: { sessionId: string }) =>
+      requestJson<{ session: ChatSession }>(CHAT_API_PATHS.SESSION_CLOSE(input.sessionId), {
+        method: "POST",
+        body: JSON.stringify({}),
+      }),
+    onSuccess: (result, variables) => {
+      queryClient.setQueryData<{ session: ChatSession; agentStates: AgentChannelState[] }>(
+        ["session", variables.sessionId],
+        (current) => ({
+          session: result.session,
+          agentStates: current?.agentStates ?? [],
+        }),
+      );
+    },
+  });
   const messagesQuery = useQuery({
     queryKey: ["messages", selectedChannel?.id, selectedSessionId],
     enabled: Boolean(selectedChannel && selectedSessionId),
@@ -121,6 +147,8 @@ export function App() {
   }, [openSessionMutation, selectedChannel, sessionIdsByChannel, usingFallbackChannels]);
 
   const liveEntries = (messagesQuery.data?.turns ?? []).map(mapTurnToEntry);
+  const sessionState = sessionStateQuery.data?.session ?? null;
+  const sessionClosed = sessionState?.status === "closed";
   const previewEntries = buildThreadPreview(
     selectedChannel,
     optimisticMessages[selectedChannel?.id ?? ""] ?? [],
@@ -176,6 +204,27 @@ export function App() {
         queryClient.setQueryData<{ notifications: Notification[] }>(["notifications"], (current) => ({
           notifications: dedupeNotifications([notification, ...(current?.notifications ?? [])]),
         }));
+        return;
+      }
+
+      if (envelope.type === "session.closed") {
+        const closedSessionId = readSessionClosedPayload(envelope.payload);
+        if (!closedSessionId || !selectedSessionId || closedSessionId !== selectedSessionId) {
+          return;
+        }
+
+        queryClient.setQueryData<{ session: ChatSession; agentStates: AgentChannelState[] }>(
+          ["session", selectedSessionId],
+          (current) => current
+            ? {
+                ...current,
+                session: {
+                  ...current.session,
+                  status: "closed",
+                },
+              }
+            : undefined,
+        );
       }
     });
 
@@ -289,12 +338,28 @@ export function App() {
                   <p className="mt-2 max-w-3xl text-sm leading-6 text-stone-600">
                     Transcript-style chat surface aligned with Paperclip’s run and inbox patterns.
                     Session history hydrates from the backend when a live channel context is available.
-                    Composer send and realtime subscriptions are next.
+                    The thread is now session-backed, realtime, and can be explicitly closed from the UI.
                   </p>
                 </div>
                 <div className="flex items-center gap-2 text-xs font-medium text-stone-500">
                   <Sparkles className="h-4 w-4 text-amber-500" />
                   {selectedSessionId ? `session ${selectedSessionId.slice(0, 8)}…` : "live shell"}
+                  {sessionClosed ? (
+                    <span className="rounded-full border border-stone-200 bg-stone-100 px-2 py-1 text-[11px] uppercase tracking-[0.14em] text-stone-600">
+                      closed
+                    </span>
+                  ) : null}
+                  {selectedSessionId && !usingFallbackChannels ? (
+                    <button
+                      type="button"
+                      onClick={() => closeSessionMutation.mutate({ sessionId: selectedSessionId })}
+                      disabled={sessionClosed || closeSessionMutation.isPending}
+                      className="ml-2 inline-flex items-center gap-1 rounded-full border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-medium text-stone-700 transition hover:bg-stone-100 disabled:cursor-not-allowed disabled:text-stone-400"
+                    >
+                      {sessionClosed ? <Lock className="h-3.5 w-3.5" /> : <X className="h-3.5 w-3.5" />}
+                      {closeSessionMutation.isPending ? "Closing…" : sessionClosed ? "Session closed" : "Close session"}
+                    </button>
+                  ) : null}
                 </div>
               </div>
             </div>
@@ -303,6 +368,11 @@ export function App() {
               {!usingFallbackChannels && !selectedSessionId ? (
                 <article className="rounded-3xl border border-dashed border-stone-300 bg-stone-50 px-4 py-4 text-sm text-stone-500">
                   Opening a session for this channel…
+                </article>
+              ) : null}
+              {sessionClosed ? (
+                <article className="rounded-3xl border border-stone-200 bg-stone-100 px-4 py-4 text-sm text-stone-600">
+                  This session has been closed. You can still review the transcript, but sending is disabled.
                 </article>
               ) : null}
               {previewEntries.map((entry) => (
@@ -382,12 +452,15 @@ export function App() {
                     value={draft}
                     onChange={(event) => setDraft(event.target.value)}
                     placeholder="Write a message. Use @mentions to wake an agent in later slices."
-                    className="min-h-28 w-full resize-none rounded-2xl border border-stone-200 bg-white px-4 py-3 text-sm leading-6 text-stone-800 outline-none transition placeholder:text-stone-400 focus:border-stone-400"
+                    disabled={sessionClosed}
+                    className="min-h-28 w-full resize-none rounded-2xl border border-stone-200 bg-white px-4 py-3 text-sm leading-6 text-stone-800 outline-none transition placeholder:text-stone-400 focus:border-stone-400 disabled:cursor-not-allowed disabled:bg-stone-100 disabled:text-stone-500"
                   />
                 </label>
                 <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <p className="text-sm leading-6 text-stone-500">
-                    {selectedSessionId
+                    {sessionClosed
+                      ? "This session is closed. Start or switch to another channel to continue chatting."
+                      : selectedSessionId
                       ? sendMessageMutation.isPending
                         ? "Sending message to the live session…"
                         : "Live session selected. Messages post to the session API and stay optimistic until the turn returns."
@@ -397,7 +470,7 @@ export function App() {
                     <span className="text-xs font-medium text-stone-500">{draftLength}/10000</span>
                     <button
                       type="submit"
-                      disabled={!selectedChannel || !selectedSessionId || draft.trim().length === 0 || sendMessageMutation.isPending}
+                      disabled={!selectedChannel || !selectedSessionId || sessionClosed || draft.trim().length === 0 || sendMessageMutation.isPending}
                       className="rounded-full bg-stone-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-stone-700 disabled:cursor-not-allowed disabled:bg-stone-300"
                     >
                       {sendMessageMutation.isPending ? "Sending…" : "Send message"}
@@ -657,6 +730,14 @@ function readNotificationPayload(value: unknown): Notification | null {
         createdAt: value.createdAt,
       }
     : null;
+}
+
+function readSessionClosedPayload(value: unknown): string | null {
+  if (!isRecord(value) || typeof value.sessionId !== "string") {
+    return null;
+  }
+
+  return value.sessionId;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
