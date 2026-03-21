@@ -1,0 +1,16 @@
+{
+  "name": "paperclip-chat",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@9.15.4",
+  "scripts": {
+    "dev": "pnpm --parallel --filter @paperclip-chat/orchestrator --filter @paperclip-chat/server --filter @paperclip-chat/ui dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test:run": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5"
+  }
+}

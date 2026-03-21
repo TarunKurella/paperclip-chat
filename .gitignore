@@ -1,4 +1,7 @@
-
-# Dolt database files (added by bd init)
-.dolt/
-*.db
+node_modules
+dist
+.turbo
+.DS_Store
+coverage
+ui/dist
+.paperclip/
