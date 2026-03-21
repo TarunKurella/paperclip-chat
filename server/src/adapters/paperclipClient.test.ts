@@ -104,6 +104,25 @@ describe("PaperclipClient", () => {
       }),
     );
   });
+
+  it("lists companies and projects for channel seeding", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse([{ id: "company-1", name: "Acme" }]))
+      .mockResolvedValueOnce(jsonResponse([{ id: "project-1", name: "Project One" }]));
+    const client = new PaperclipClient({
+      baseUrl: "http://localhost:3100",
+      serviceKey: "secret",
+      fetchImpl: fetchMock,
+      retryDelaysMs: [0],
+    });
+
+    const companies = await client.listCompanies();
+    const projects = await client.listProjects("company-1");
+
+    expect(companies).toEqual([{ id: "company-1", name: "Acme" }]);
+    expect(projects).toEqual([{ id: "project-1", companyId: "company-1", name: "Project One" }]);
+  });
 });
 
 function jsonResponse(body: unknown, init: ResponseInit = {}): Response {

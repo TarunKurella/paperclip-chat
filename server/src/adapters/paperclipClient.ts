@@ -15,6 +15,12 @@ const companySchema = z.object({
   name: z.string().optional(),
 });
 
+const projectSchema = z.object({
+  id: z.string(),
+  companyId: z.string().optional(),
+  name: z.string(),
+});
+
 const issueSchema = z.object({
   id: z.string(),
   projectId: z.string().nullable().optional(),
@@ -64,6 +70,7 @@ const agentsListSchema = z.union([z.array(agentSchema), z.object({ agents: z.arr
 
 export type PaperclipAgent = z.infer<typeof agentSchema>;
 export type PaperclipCompany = z.infer<typeof companySchema>;
+export type PaperclipProject = z.infer<typeof projectSchema>;
 export type PaperclipIssue = z.infer<typeof issueSchema>;
 export type PaperclipSessionValidation = z.infer<typeof sessionValidationSchema>;
 export type PaperclipCurrentAgent = z.infer<typeof currentAgentSchema>;
@@ -121,6 +128,18 @@ export class PaperclipClient {
 
   async getCompany(companyId: string): Promise<PaperclipCompany> {
     return companySchema.parse(await this.requestJson(`/api/companies/${companyId}`));
+  }
+
+  async listCompanies(): Promise<PaperclipCompany[]> {
+    return z.array(companySchema).parse(await this.requestJson("/api/companies"));
+  }
+
+  async listProjects(companyId: string): Promise<PaperclipProject[]> {
+    const projects = z.array(projectSchema).parse(await this.requestJson(`/api/companies/${companyId}/projects`));
+    return projects.map((project) => ({
+      ...project,
+      companyId: project.companyId ?? companyId,
+    }));
   }
 
   async createIssue(companyId: string, issue: Record<string, unknown>): Promise<PaperclipIssue> {

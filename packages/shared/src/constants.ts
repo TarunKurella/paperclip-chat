@@ -16,3 +16,16 @@ export const AGENT_CHANNEL_STATUSES = ["absent", "observing", "active"] as const
 export const CHAT_PRESENCE = ["available", "busy_task", "busy_dm", "offline"] as const;
 export const SESSION_STATUSES = ["active", "closed"] as const;
 export const NOTIFICATION_TYPES = ["agent_initiated", "unread_message", "decision_pending"] as const;
+
+export const CHAT_EVENT_TYPES = {
+  CHAT_MESSAGE: "chat.message",
+  CHAT_MESSAGE_STREAM: "chat.message.stream",
+  AGENT_TYPING: "agent.typing",
+  AGENT_STATUS: "agent.status",
+  AGENT_INITIATED_CHAT: "agent.initiated_chat",
+  SESSION_DECISION: "session.decision",
+  SESSION_SUMMARY: "session.summary",
+  SESSION_TOKENS: "session.tokens",
+  SESSION_CLOSED: "session.closed",
+  NOTIFICATION_NEW: "notification.new",
+} as const;

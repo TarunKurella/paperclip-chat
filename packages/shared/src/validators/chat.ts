@@ -42,10 +42,16 @@ export const createChannelSchema = z.object({
         participantId: uuidSchema,
       }),
     )
-    .min(1),
+    .optional()
+    .default([]),
+});
+
+export const listChannelsQuerySchema = z.object({
+  companyId: uuidSchema,
 });
 
 export type SendMessage = z.infer<typeof sendMessageSchema>;
 export type OpenSession = z.infer<typeof openSessionSchema>;
 export type CloseSession = z.infer<typeof closeSessionSchema>;
 export type CreateChannel = z.infer<typeof createChannelSchema>;
+export type ListChannelsQuery = z.infer<typeof listChannelsQuerySchema>;
