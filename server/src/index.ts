@@ -15,6 +15,7 @@ import { InMemoryChannelRepository } from "./channels/memoryRepository.js";
 import { TrunkManager } from "./context/TrunkManager.js";
 import { createServerDatabase } from "./db/client.js";
 import { notificationRoutes } from "./notifications/routes.js";
+import { skillRoutes } from "./skills/routes.js";
 import { DebounceBuffer } from "./session/Debounce.js";
 import { InMemorySessionRepository } from "./session/memoryRepository.js";
 import { SessionManager } from "./session/SessionManager.js";
@@ -85,6 +86,7 @@ export async function bootstrapServer(envSource: NodeJS.ProcessEnv = process.env
   app.get("/api/health", (_req, res) => {
     res.json({ status: "ok", paperclip: "connected", ws: "running" });
   });
+  app.use("/api", skillRoutes());
   app.use(
     "/api",
     channelRoutes(channelService, {
