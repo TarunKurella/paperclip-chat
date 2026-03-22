@@ -1,8 +1,10 @@
 import { useEffect, useState, startTransition } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { APP_NAME, CHAT_API_PATHS, type AgentChannelState, type Channel, type ChatSession, type Notification, type Turn } from "@paperclip-chat/shared";
+import { APP_NAME, CHAT_API_PATHS, type AgentChannelState, type Channel, type ChatSession, type Notification, type SessionParticipant, type Turn } from "@paperclip-chat/shared";
 import { cn } from "./lib/utils.js";
 import { Routes, Route, Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
+import { ChatThread, type AgentPresence, type ThreadEntry } from "./components/ChatThread.js";
+import { MessageInput, type MentionCandidate } from "./components/MessageInput.js";
 import { Sidebar } from "./components/Sidebar.js";
 import { StatusPill } from "./components/StatusPill.js";
 import {
@@ -11,7 +13,6 @@ import {
   PanelRight,
   Lock,
   MessageSquareText,
-  Radio,
   Sparkles,
   TriangleAlert,
   X,
@@ -42,6 +43,7 @@ function Shell() {
   const [mobileActivityOpen, setMobileActivityOpen] = useState(false);
   const [newDmOpen, setNewDmOpen] = useState(false);
   const [newDmName, setNewDmName] = useState("");
+  const [visibleEntryCount, setVisibleEntryCount] = useState(20);
   const healthQuery = useQuery({
     queryKey: ["health"],
     queryFn: async () => requestJson<{ status: string; paperclip: string; ws: string }>("/api/health"),
@@ -90,7 +92,6 @@ function Shell() {
   const notificationsRoute = location.pathname === "/notifications";
   const usingFallbackChannels = !companyId || channelsQuery.isError || channels.length === 0;
   const unauthenticatedNotifications = notificationsQuery.isError;
-  const draftLength = draft.length;
   const unreadCountByChannel = notifications.reduce<Record<string, number>>((acc, notification) => {
     const channelId = typeof notification.payload.channelId === "string" ? notification.payload.channelId : null;
     if (!channelId) {
@@ -139,12 +140,12 @@ function Shell() {
     },
   });
   const sendMessageMutation = useMutation({
-    mutationFn: async (input: { sessionId: string; channelId: string; text: string }) =>
+    mutationFn: async (input: { sessionId: string; channelId: string; text: string; mentionedIds: string[] }) =>
       requestJson<{ turn: Turn }>(CHAT_API_PATHS.SESSION_SEND(input.sessionId), {
         method: "POST",
         body: JSON.stringify({
           text: input.text,
-          mentionedIds: [],
+          mentionedIds: input.mentionedIds,
         }),
       }),
     onSuccess: (result, variables) => {
@@ -198,6 +199,12 @@ function Shell() {
     queryFn: async () =>
       requestJson<{ turns: Turn[] }>(CHAT_API_PATHS.SESSION_TOKENS(selectedSessionId!)),
   });
+  const sessionParticipantsQuery = useQuery({
+    queryKey: ["session-participants", selectedSessionId],
+    enabled: Boolean(selectedSessionId),
+    queryFn: async () =>
+      requestJson<{ participants: SessionParticipant[] }>(`${CHAT_API_PATHS.SESSION(selectedSessionId!)}/participants`),
+  });
 
   useEffect(() => {
     if (!selectedChannel || usingFallbackChannels || sessionIdsByChannel[selectedChannel.id] || openSessionMutation.isPending) {
@@ -217,11 +224,13 @@ function Shell() {
   const tokenTurns = tokenUsageQuery.data?.turns ?? [];
   const totalTokenCount = tokenTurns.reduce((sum, turn) => sum + turn.tokenCount, 0);
   const sessionClosed = sessionState?.status === "closed";
-  const previewEntries = buildThreadPreview(
+  const previewEntries: ThreadEntry[] = buildThreadPreview(
     selectedChannel,
     optimisticMessages[selectedChannel?.id ?? ""] ?? [],
     liveEntries,
   );
+  const mentionCandidates = buildMentionCandidates(sessionParticipantsQuery.data?.participants ?? [], presenceByAgent);
+  const mentionSuggestions = readMentionSuggestions(draft, mentionCandidates);
   const previewsByChannel = Object.fromEntries(
     channels.map((channel) => {
       const preview = channel.id === selectedChannel?.id
@@ -240,6 +249,10 @@ function Shell() {
   if (!selectedChannel && channels.length > 0 && location.pathname !== "/notifications") {
     return <Navigate to={`/channels/${channels[0]!.id}${location.search}`} replace />;
   }
+
+  useEffect(() => {
+    setVisibleEntryCount(20);
+  }, [selectedChannelId, selectedSessionId]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -488,81 +501,33 @@ function Shell() {
               </div>
             </div>
 
-            <div className="flex-1 space-y-4 overflow-y-auto px-6 py-5">
-              {!usingFallbackChannels && !selectedSessionId ? (
-                <article className="rounded-3xl border border-dashed border-stone-300 bg-stone-50 px-4 py-4 text-sm text-stone-500">
-                  Opening a session for this channel…
-                </article>
-              ) : null}
-              {sessionClosed ? (
-                <article className="rounded-3xl border border-stone-200 bg-stone-100 px-4 py-4 text-sm text-stone-600">
-                  This session has been closed. You can still review the transcript, but sending is disabled.
-                </article>
-              ) : null}
-              {liveDecision ? (
-                <article className="rounded-3xl border border-amber-200 bg-amber-50 px-4 py-4">
-                  <div className="flex items-center justify-between gap-4">
-                    <div className="flex items-center gap-3">
-                      <span className="h-2.5 w-2.5 rounded-full bg-amber-500" />
-                      <p className="text-sm font-semibold text-stone-900">Live decision</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setLiveDecision(null)}
-                      className="rounded-full border border-amber-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-amber-700"
-                    >
-                      dismiss
-                    </button>
-                  </div>
-                  <p className="mt-3 text-sm leading-7 text-stone-700">{liveDecision.body}</p>
-                </article>
-              ) : null}
-              {previewEntries.map((entry) => (
-                <article
-                  key={entry.id}
-                  className={cn(
-                    "rounded-3xl border px-4 py-4",
-                    entry.isDecision ? "border-amber-200 bg-amber-50/80" : "border-stone-200 bg-stone-50/70",
-                  )}
-                >
-                  <div className="flex items-center justify-between gap-4">
-                    <div className="flex items-center gap-3">
-                      <div
-                        className={cn(
-                          "h-2.5 w-2.5 rounded-full",
-                          entry.kind === "agent" ? "bg-green-500" : "bg-gray-400",
-                        )}
-                      />
-                      <p className="text-sm font-semibold text-stone-900">{entry.author}</p>
-                      <span className="text-xs uppercase tracking-[0.16em] text-stone-500">{entry.kind}</span>
-                      {entry.isDecision ? (
-                        <span className="rounded-full border border-amber-200 bg-white px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-amber-700">
-                          decision
-                        </span>
-                      ) : null}
-                    </div>
-                    <span className="text-xs text-stone-500">{entry.timestamp}</span>
-                  </div>
-                  <p className="mt-3 text-sm leading-7 text-stone-700">{entry.body}</p>
-                </article>
-              ))}
-            </div>
+            <ChatThread
+              selectedChannelName={selectedChannel?.name ?? null}
+              sessionState={sessionState}
+              agentStates={agentStates}
+              presenceByAgent={presenceByAgent}
+              sessionId={selectedSessionId}
+              sessionClosed={sessionClosed}
+              openingSession={!usingFallbackChannels && !selectedSessionId}
+              liveDecision={liveDecision}
+              entries={previewEntries}
+              visibleCount={visibleEntryCount}
+              onShowMore={() => setVisibleEntryCount((current) => current + 20)}
+              onDismissDecision={() => setLiveDecision(null)}
+            />
 
             <div className="border-t border-stone-200 px-6 py-5">
-              <form
-                className="rounded-[24px] border border-stone-200 bg-stone-50 px-4 py-4"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  if (!selectedChannel || !draft.trim()) {
+              <MessageInput
+                draft={draft}
+                onDraftChange={setDraft}
+                onSubmit={() => {
+                  if (!selectedChannel || !draft.trim() || !selectedSessionId) {
                     return;
                   }
 
                   const channelId = selectedChannel.id;
                   const nextDraft = draft.trim();
-                  if (!selectedSessionId) {
-                    return;
-                  }
-
+                  const mentionedIds = readMentionedIds(nextDraft, mentionCandidates);
                   const nextEntry: ThreadEntry = {
                     id: `${channelId}-optimistic-${Date.now()}`,
                     author: "Operator",
@@ -583,6 +548,7 @@ function Shell() {
                       sessionId: selectedSessionId,
                       channelId,
                       text: nextDraft,
+                      mentionedIds,
                     },
                     {
                       onError: () => {
@@ -595,43 +561,13 @@ function Shell() {
                     },
                   );
                 }}
-              >
-                <div className="flex items-center gap-2 text-sm font-medium text-stone-700">
-                  <Radio className="h-4 w-4 text-blue-500" />
-                  Message composer
-                </div>
-                <label className="mt-3 block">
-                  <span className="sr-only">Draft message</span>
-                  <textarea
-                    value={draft}
-                    onChange={(event) => setDraft(event.target.value)}
-                    placeholder="Write a message. Use @mentions to wake an agent in later slices."
-                    disabled={sessionClosed}
-                    className="min-h-28 w-full resize-none rounded-2xl border border-stone-200 bg-white px-4 py-3 text-sm leading-6 text-stone-800 outline-none transition placeholder:text-stone-400 focus:border-stone-400 disabled:cursor-not-allowed disabled:bg-stone-100 disabled:text-stone-500"
-                  />
-                </label>
-                <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <p className="text-sm leading-6 text-stone-500">
-                    {sessionClosed
-                      ? "This session is closed. Start or switch to another channel to continue chatting."
-                      : selectedSessionId
-                      ? sendMessageMutation.isPending
-                        ? "Sending message to the live session…"
-                        : "Live session selected. Messages post to the session API and stay optimistic until the turn returns."
-                      : "Composer is optimistic-only until a live session is opened for the selected channel."}
-                  </p>
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs font-medium text-stone-500">{draftLength}/10000</span>
-                    <button
-                      type="submit"
-                      disabled={!selectedChannel || !selectedSessionId || sessionClosed || draft.trim().length === 0 || sendMessageMutation.isPending}
-                      className="rounded-full bg-stone-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-stone-700 disabled:cursor-not-allowed disabled:bg-stone-300"
-                    >
-                      {sendMessageMutation.isPending ? "Sending…" : "Send message"}
-                    </button>
-                  </div>
-                </div>
-              </form>
+                disabled={!selectedChannel || !selectedSessionId || sessionClosed}
+                pending={sendMessageMutation.isPending}
+                sessionClosed={sessionClosed}
+                hasSession={Boolean(selectedSessionId)}
+                suggestions={mentionSuggestions}
+                onSelectMention={(candidate) => setDraft(insertMention(draft, candidate.label))}
+              />
             </div>
           </section>
 
@@ -911,7 +847,7 @@ function Shell() {
   );
 }
 
-function buildThreadPreview(channel: Channel | null, optimisticEntries: ThreadEntry[], liveEntries: ThreadEntry[]) {
+function buildThreadPreview(channel: Channel | null, optimisticEntries: ThreadEntry[], liveEntries: ThreadEntry[]): ThreadEntry[] {
   if (!channel) {
     return [];
   }
@@ -924,7 +860,7 @@ function buildThreadPreview(channel: Channel | null, optimisticEntries: ThreadEn
     {
       id: `${channel.id}-1`,
       author: "Operator",
-      kind: "human",
+      kind: "human" as const,
       timestamp: "just now",
       body: `Opened ${channel.name} and prepared the chat surface for live session traffic.`,
       isDecision: false,
@@ -932,7 +868,7 @@ function buildThreadPreview(channel: Channel | null, optimisticEntries: ThreadEn
     {
       id: `${channel.id}-2`,
       author: "paperclip-chat",
-      kind: "agent",
+      kind: "agent" as const,
       timestamp: "live",
       body: "Session routes, token counting, history pagination, and notifications are now wired. Composer send and realtime thread hydration are next.",
       isDecision: false,
@@ -961,15 +897,6 @@ function dedupeNotifications(notifications: Notification[]) {
     seen.add(notification.id);
     return true;
   });
-}
-
-interface ThreadEntry {
-  id: string;
-  author: string;
-  kind: "human" | "agent";
-  timestamp: string;
-  body: string;
-  isDecision: boolean;
 }
 
 function renderNotificationTitle(notification: Notification) {
@@ -1130,6 +1057,61 @@ function agentStateToneClass(status: AgentChannelState["status"]) {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function buildMentionCandidates(
+  participants: SessionParticipant[],
+  presenceByAgent: Record<string, AgentPresence>,
+): MentionCandidate[] {
+  const seen = new Set<string>();
+  const candidates: MentionCandidate[] = [];
+
+  for (const participant of participants) {
+    if (seen.has(participant.participantId)) {
+      continue;
+    }
+    seen.add(participant.participantId);
+    candidates.push({
+      id: participant.participantId,
+      label: `${participant.participantType === "agent" ? "agent" : "user"}-${participant.participantId.slice(0, 6)}`,
+      kind: participant.participantType,
+    });
+  }
+
+  for (const agentId of Object.keys(presenceByAgent)) {
+    if (seen.has(agentId)) {
+      continue;
+    }
+    seen.add(agentId);
+    candidates.push({
+      id: agentId,
+      label: `agent-${agentId.slice(0, 6)}`,
+      kind: "agent",
+    });
+  }
+
+  return candidates;
+}
+
+function readMentionSuggestions(draft: string, candidates: MentionCandidate[]) {
+  const match = /(^|\s)@([a-z0-9-]*)$/i.exec(draft);
+  if (!match) {
+    return [];
+  }
+
+  const query = match[2]?.toLowerCase() ?? "";
+  return candidates.filter((candidate) => candidate.label.toLowerCase().includes(query)).slice(0, 5);
+}
+
+function insertMention(draft: string, label: string) {
+  return draft.replace(/(^|\s)@([a-z0-9-]*)$/i, (_whole, prefix) => `${prefix}@${label} `);
+}
+
+function readMentionedIds(draft: string, candidates: MentionCandidate[]) {
+  const lowered = draft.toLowerCase();
+  return candidates
+    .filter((candidate) => lowered.includes(`@${candidate.label.toLowerCase()}`))
+    .map((candidate) => candidate.id);
 }
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
