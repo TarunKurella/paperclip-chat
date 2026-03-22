@@ -50,6 +50,51 @@ export class DbSessionRepository implements SessionRepository, NotificationRepos
     return row ? mapSessionRow(row) : null;
   }
 
+  async checkpointSession(input: {
+    sessionId: string;
+    lastCrystallizedSeq: number;
+    lastCrystallizedIssueId: string | null;
+  }): Promise<ChatSession | null> {
+    const row = await this.db.transaction(async (tx) => {
+      const updatedSession = await tx
+        .update(chatSessions)
+        .set({
+          lastCrystallizedSeq: input.lastCrystallizedSeq,
+          lastCrystallizedIssueId: input.lastCrystallizedIssueId,
+        })
+        .where(eq(chatSessions.id, input.sessionId))
+        .returning()
+        .then((results) => results[0] ?? null);
+
+      if (!updatedSession) {
+        return null;
+      }
+
+      await tx
+        .insert(sessionSummaries)
+        .values({
+          sessionId: input.sessionId,
+          text: "",
+          tokenCount: 0,
+          chunkSeqCovered: input.lastCrystallizedSeq,
+          updatedAt: new Date(),
+        })
+        .onConflictDoUpdate({
+          target: sessionSummaries.sessionId,
+          set: {
+            text: "",
+            tokenCount: 0,
+            chunkSeqCovered: input.lastCrystallizedSeq,
+            updatedAt: new Date(),
+          },
+        });
+
+      return updatedSession;
+    });
+
+    return row ? mapSessionRow(row) : null;
+  }
+
   async getSession(sessionId: string): Promise<ChatSession | null> {
     const row = await this.db
       .select()
@@ -340,6 +385,8 @@ function mapSessionRow(row: typeof chatSessions.$inferSelect): ChatSession {
     chunkWindowWTokens: row.chunkWindowWTokens,
     verbatimKTokens: row.verbatimKTokens,
     currentSeq: row.currentSeq,
+    lastCrystallizedSeq: row.lastCrystallizedSeq,
+    lastCrystallizedIssueId: row.lastCrystallizedIssueId,
   };
 }
 

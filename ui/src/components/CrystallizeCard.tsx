@@ -19,7 +19,7 @@ export function CrystallizeCard(props: {
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">Crystallize</p>
             <h2 className="mt-1 text-xl font-semibold text-stone-900">Confirm Paperclip issue handoff</h2>
             <p className="mt-2 text-sm leading-6 text-stone-600">
-              This will close the active chat session and create a Paperclip issue using the current folded context.
+              This will create a Paperclip issue snapshot from the current chat context. The conversation stays open.
             </p>
           </div>
         </div>

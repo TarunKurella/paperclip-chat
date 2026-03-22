@@ -170,6 +170,8 @@ function makeSession(overrides: Partial<ChatSession> = {}): ChatSession {
     chunkWindowWTokens: 1200,
     verbatimKTokens: 800,
     currentSeq: 3,
+    lastCrystallizedSeq: null,
+    lastCrystallizedIssueId: null,
     ...overrides,
   };
 }

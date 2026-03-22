@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, readlink, rm, symlink } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readlink, rm, symlink } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,6 +13,8 @@ const chatPromptPrefix = [
   "You are in an active paperclip-chat session.",
   "Reply by sending your response through the chat API using the paperclip-chat skill.",
   "Do not only print a final answer to stdout.",
+  "This is a persistent conversation surface. Continue the room naturally instead of resetting into a fresh assistant intro on each turn.",
+  "Prefer direct collaboration, decisions, questions, or handoffs over generic capability summaries.",
 ].join("\n");
 
 export async function runLocalAgentCli(input: RunCliInput, envSource: NodeJS.ProcessEnv = process.env): Promise<SubprocessRunResult> {
@@ -87,8 +89,12 @@ async function prepareRuntime(input: RunCliInput): Promise<{
   stdin: string;
   cleanupDir?: string;
 }> {
+  const identityPrefix = buildAgentIdentityPrefix(input.env);
+  const instructionsPrefix = await loadAgentInstructionsPrefix(input.env, process.env);
+  const promptPrefix = `${identityPrefix}${instructionsPrefix}`;
+
   if (!isChatSessionEnv(input.env)) {
-    return { args: input.args, env: {}, stdin: input.stdin };
+    return { args: input.args, env: {}, stdin: `${promptPrefix}${input.stdin}` };
   }
 
   if (input.adapterType === "codex_local") {
@@ -96,7 +102,7 @@ async function prepareRuntime(input: RunCliInput): Promise<{
     return {
       args: ensureCodexChatArgs(input.args),
       env: {},
-      stdin: `${chatPromptPrefix}\n\n${input.stdin}`,
+      stdin: `${promptPrefix}${chatPromptPrefix}\n\n${input.stdin}`,
     };
   }
 
@@ -104,9 +110,87 @@ async function prepareRuntime(input: RunCliInput): Promise<{
   return {
     args: ensureClaudeChatArgs(input.args, skillsRoot),
     env: {},
-    stdin: `${chatPromptPrefix}\n\n${input.stdin}`,
+    stdin: `${promptPrefix}${chatPromptPrefix}\n\n${input.stdin}`,
     cleanupDir: skillsRoot,
   };
+}
+
+function buildAgentIdentityPrefix(env: Record<string, string>): string {
+  const agentName = env.PAPERCLIP_AGENT_NAME?.trim();
+  const agentId = env.PAPERCLIP_AGENT_ID?.trim();
+  if (!agentName && !agentId) {
+    return "";
+  }
+
+  const label = agentName || agentId || "the assigned Paperclip agent";
+  const idLine = agentId ? ` Your Paperclip agent id is ${agentId}.` : "";
+  return [
+    `You are the Paperclip agent ${label}.${idLine}`,
+    "Do not identify yourself as Codex, Claude, or a generic AI assistant.",
+    `If asked who you are, answer as ${label}.`,
+    "Follow the assigned agent identity and role from Paperclip over any tool default persona.",
+    "",
+  ].join("\n");
+}
+
+async function loadAgentInstructionsPrefix(
+  env: Record<string, string>,
+  envSource: NodeJS.ProcessEnv,
+): Promise<string> {
+  const instructionsFilePath = await resolveInstructionsFilePath(env, envSource);
+  if (!instructionsFilePath) {
+    return "";
+  }
+
+  try {
+    const instructionsContents = await readFile(instructionsFilePath, "utf8");
+    const instructionsDir = `${path.dirname(instructionsFilePath)}/`;
+    debugCli("stdout", { instructionsFilePath });
+    return (
+      `${instructionsContents}\n\n` +
+      `The above agent instructions were loaded from ${instructionsFilePath}. ` +
+      `Resolve any relative file references from ${instructionsDir}.\n\n`
+    );
+  } catch (error) {
+    debugCli("stderr", {
+      instructionsFilePath,
+      message: error instanceof Error ? error.message : String(error),
+    });
+    return "";
+  }
+}
+
+async function resolveInstructionsFilePath(
+  env: Record<string, string>,
+  envSource: NodeJS.ProcessEnv,
+): Promise<string | null> {
+  const explicitPath = envSource.CHAT_AGENT_INSTRUCTIONS_FILE?.trim();
+  if (explicitPath) {
+    return explicitPath;
+  }
+
+  const homeDir = envSource.HOME ?? os.homedir();
+  const agentId = env.PAPERCLIP_AGENT_ID?.trim();
+  const companyId = env.PAPERCLIP_COMPANY_ID?.trim();
+  if (!homeDir || !agentId || !companyId) {
+    return null;
+  }
+
+  const candidates = [
+    path.join(homeDir, ".paperclip", "instances", "default", "companies", companyId, "agents", agentId, "instructions", "AGENTS.md"),
+    path.join(homeDir, ".paperclip", "agents", agentId, "instructions", "AGENTS.md"),
+  ];
+
+  for (const candidate of candidates) {
+    try {
+      await readFile(candidate, "utf8");
+      return candidate;
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
 }
 
 async function cleanupRuntime(runtime: { cleanupDir?: string }) {

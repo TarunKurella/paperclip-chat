@@ -47,6 +47,8 @@ function createStore(): ContextStore {
     chunkWindowWTokens: 10,
     verbatimKTokens: 8,
     currentSeq: 2,
+    lastCrystallizedSeq: null,
+    lastCrystallizedIssueId: null,
   };
   const turns = [
     {

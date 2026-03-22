@@ -53,6 +53,7 @@ export class AgentDispatchCoordinator {
 
     const participants = await this.sessions.listSessionParticipants(sessionId);
     const useDmShortcut = shouldUseDmShortcut(channel.type, participants.length);
+    const contextFloorSeq = session.lastCrystallizedSeq ?? 0;
     const agentStates = await this.sessions.listAgentStates(sessionId);
     const agentState = agentStates.find((state) => state.participantId === agentId) ?? (
       useDmShortcut
@@ -76,14 +77,14 @@ export class AgentDispatchCoordinator {
     }
 
     const priorTurns = await this.sessions.listTurns(sessionId, { limit: 200 });
-    const globalSummary = await this.context.getSummary(sessionId);
+    const globalSummary = contextFloorSeq > 0 ? null : await this.context.getSummary(sessionId);
     const triggeringTurn = toBatchedTrigger(turns);
     const senderName = turns.length === 1 ? turns[0]!.fromParticipantId : "Recent messages";
     const chunks = useDmShortcut || agentState.status === "absent"
       ? []
       : (await this.context.listChunks(sessionId)).filter(
           (chunk) =>
-            chunk.chunkStart > agentState.anchorSeq,
+            chunk.chunkEnd > Math.max(agentState.anchorSeq, contextFloorSeq),
         );
 
     const packet = assemblePacket({
@@ -99,12 +100,14 @@ export class AgentDispatchCoordinator {
       turns: priorTurns,
       chunks,
       globalSummary,
+      contextFloorSeq,
     });
 
     const result = await this.subprocessManager.run({
       adapterType: agent.adapterType ?? "claude_local",
       agentStatus: agent.status ?? null,
       agentId,
+      agentName: agent.name || agentId,
       sessionId,
       channel,
       channelId: channel.id,

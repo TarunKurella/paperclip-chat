@@ -1,8 +1,13 @@
 import { EventEmitter } from "node:events";
+import { execFile } from "node:child_process";
+import path from "node:path";
+import { promisify } from "node:util";
 import { createDefaultSandboxPolicy, runCodexTurn } from "./codex.js";
 import type { NormalizedBead } from "./beads.js";
 import type { WorkspaceManager, WorkspaceRecord } from "./workspace.js";
 import type { ResolvedWorkflowConfig, WorkflowDefinition } from "./workflow.js";
+
+const execFileAsync = promisify(execFile);
 
 export interface RetryEntry {
   beadId: string;
@@ -215,6 +220,8 @@ export class Orchestrator extends EventEmitter {
 
   private async runWorkerAttempt(entry: RunningEntry): Promise<WorkerResult> {
     try {
+      await this.runDispatchCommands(entry.bead);
+
       const workspace = await this.workspaceManager.createForBead(entry.identifier);
       entry.workspace = workspace;
       await this.workspaceManager.runBeforeRun(workspace.path);
@@ -262,6 +269,16 @@ export class Orchestrator extends EventEmitter {
         reason: "failed",
         error: error instanceof Error ? error.message : String(error),
       };
+    }
+  }
+
+  private async runDispatchCommands(bead: NormalizedBead): Promise<void> {
+    if (this.config.beads.claimOnDispatch && this.config.beads.claimCommandTemplate) {
+      await runTemplateCommand(this.config.beads.claimCommandTemplate, bead, pathForCommand(this.config.workflowPath));
+    }
+
+    if (this.config.beads.startCommandTemplate) {
+      await runTemplateCommand(this.config.beads.startCommandTemplate, bead, pathForCommand(this.config.workflowPath));
     }
   }
 
@@ -380,4 +397,21 @@ export function sortForDispatch(beads: NormalizedBead[]): NormalizedBead[] {
 
 function elapsedSeconds(startedAt: string): number {
   return Math.max((Date.now() - new Date(startedAt).getTime()) / 1000, 0);
+}
+
+async function runTemplateCommand(template: string, bead: NormalizedBead, cwd: string): Promise<void> {
+  const command = template
+    .replaceAll("{{ bead.identifier }}", bead.identifier)
+    .replaceAll("{{ bead.id }}", bead.id)
+    .replaceAll("{{ bead.title }}", bead.title);
+
+  const { stderr, stdout } = await execFileAsync("sh", ["-lc", command], { cwd });
+  const combined = `${stdout}${stderr}`.trim();
+  if (combined.length > 0) {
+    return;
+  }
+}
+
+function pathForCommand(workflowPath: string): string {
+  return path.dirname(workflowPath);
 }

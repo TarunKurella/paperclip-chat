@@ -23,7 +23,7 @@ const passThrough: RequestHandler = (_req, _res, next) => next();
 export function sessionRoutes(
   sessionManager: Pick<
     SessionManager,
-    "openSession" | "processTurn" | "closeSession" | "getSessionState" | "getTokenUsage" | "listMessages" | "listSessionParticipants"
+    "openSession" | "processTurn" | "closeSession" | "getSessionState" | "getTokenUsage" | "listMessages" | "listSessionParticipants" | "getCrystallizePreview"
   >,
   auth: SessionRouteAuth = {},
   hooks: SessionRouteHooks = {},
@@ -85,7 +85,9 @@ export function sessionRoutes(
       const sessionId = readParam(req.params.id);
       const { crystallize } = closeSessionSchema.parse(req.body ?? {});
       const result = await sessionManager.closeSession({ sessionId, crystallize });
-      await hooks.onSessionClosed?.(sessionId);
+      if (result.session.status === "closed") {
+        await hooks.onSessionClosed?.(sessionId);
+      }
       res.json(result);
     },
   );
@@ -106,6 +108,12 @@ export function sessionRoutes(
     const sessionId = readParam(req.params.id);
     const participants = await sessionManager.listSessionParticipants(sessionId);
     res.json({ participants });
+  });
+
+  router.get("/sessions/:id/preview", auth.authenticate ?? passThrough, auth.requireAny ?? passThrough, async (req, res) => {
+    const sessionId = readParam(req.params.id);
+    const preview = await sessionManager.getCrystallizePreview(sessionId);
+    res.json(preview);
   });
 
   router.get(

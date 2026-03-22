@@ -25,7 +25,9 @@ describe("PacketAssembler", () => {
     expect(result.mode).toBe("absent");
     expect(result.text).toContain("You are the CEO agent.");
     expect(result.text).toContain("[SUMMARY]");
-    expect(result.text).toContain("[Alice @CEO]: What should we ship?");
+    expect(result.text).toContain("[Latest turn for CEO]");
+    expect(result.text).toContain("From: Alice");
+    expect(result.text).toContain("Content: What should we ship?");
   });
 
   it("builds an observing packet with chunks and no bootstrap prompt", () => {

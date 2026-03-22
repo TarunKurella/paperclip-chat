@@ -148,6 +148,8 @@ describe("WakeupScaffoldManager", () => {
         chunkWindowWTokens: 1200,
         verbatimKTokens: 800,
         currentSeq: 1,
+        lastCrystallizedSeq: null,
+        lastCrystallizedIssueId: null,
       },
       {
         id: "channel-1",

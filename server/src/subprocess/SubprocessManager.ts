@@ -39,6 +39,7 @@ export interface SpawnRequest {
   adapterType: string;
   agentStatus?: string | null;
   agentId: string;
+  agentName?: string | null;
   sessionId: string;
   channel: Channel;
   channelId: string;
@@ -124,6 +125,7 @@ export class SubprocessManager {
             CHAT_API_TOKEN: token,
             PAPERCLIP_API_URL: this.env.PAPERCLIP_API_URL ?? "",
             PAPERCLIP_AGENT_ID: request.agentId,
+            PAPERCLIP_AGENT_NAME: request.agentName ?? "",
             PAPERCLIP_COMPANY_ID: request.channel.companyId,
             PAPERCLIP_WORKSPACE_CWD: workspace.cwd,
             AGENT_HOME: workspace.cwd,

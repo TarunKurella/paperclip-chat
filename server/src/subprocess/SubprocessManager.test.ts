@@ -110,6 +110,7 @@ describe("SubprocessManager", () => {
         env: expect.objectContaining({
           CHAT_API_URL: "http://127.0.0.1:4011",
           CHAT_SESSION_ID: "session-1",
+          PAPERCLIP_AGENT_NAME: "",
           PAPERCLIP_WAKE_REASON: "chat_message",
           PAPERCLIP_WAKE_COMMENT_ID: "turn-1",
         }),
@@ -322,6 +323,33 @@ describe("SubprocessManager", () => {
       }),
     );
     vi.unstubAllGlobals();
+  });
+
+  it("passes the Paperclip agent name into the local subprocess env", async () => {
+    const queue = { flush: vi.fn() };
+    const presence = new PresenceStateMachine(queue);
+    presence.updateFromPaperclip("agent-1", "idle");
+
+    const runner = vi.fn().mockResolvedValue({});
+    const manager = new SubprocessManager(
+      presence,
+      vi.fn().mockResolvedValue({ cwd: "/tmp/workspace", sessionPath: "/tmp/session" }),
+      runner,
+      { saveAgentState: vi.fn().mockResolvedValue(undefined), listTurns: vi.fn().mockResolvedValue([]) },
+      { broadcast: vi.fn() },
+      { CHAT_TOKEN_SECRET: "secret", CHAT_API_URL: "http://127.0.0.1:4011" },
+    );
+
+    await manager.run(makeRequest({ agentName: "tester" }));
+
+    expect(runner).toHaveBeenCalledWith(
+      expect.objectContaining({
+        env: expect.objectContaining({
+          PAPERCLIP_AGENT_ID: "agent-1",
+          PAPERCLIP_AGENT_NAME: "tester",
+        }),
+      }),
+    );
   });
 });
 

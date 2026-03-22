@@ -31,7 +31,7 @@ Send a chat turn with:
 curl -X POST "$CHAT_API_URL/api/sessions/$CHAT_SESSION_ID/send" \
   -H "Authorization: Bearer $CHAT_API_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"text":"@alice I need a decision on the rollout plan.","mentionedIds":[]}'
+  -d '{"text":"I need a decision on the rollout plan.","mentionedIds":[]}'
 ```
 
 Discover channels with:
@@ -44,7 +44,21 @@ curl -H "Authorization: Bearer $CHAT_API_TOKEN" "$CHAT_API_URL/api/channels?comp
 
 - Prefix decisive turns with `[DECISION]`.
 - Use `/crystallize` or a crystallize request when the session should become a Paperclip issue.
-- Mention the right participant with `@name` when you need a response in chat.
+- In a 1:1 DM, reply naturally. Do not prefix every reply with `@name`.
+- Use `@name` only when you actually need to notify or disambiguate a participant in a multi-party chat.
+- In a multi-agent room, if you are replying to another agent or asking them to act, use their `@name` explicitly.
+- If a human tells you to ask another participant a question, ask that participant directly with `@name` instead of answering on their behalf.
+- Behave like an agent participant in a shared room, not like a generic chatbot explaining its capabilities.
+- Prefer acting on the latest ask over listing everything you can do.
+- Keep turns conversational, specific, and short unless detail is clearly needed.
+- Never address a human by a raw participant id. Use their visible name or omit the name.
+- Do not ping yourself, and do not repeat another participant's `@name` unless you are intentionally handing them the floor.
+- If another agent should take over, send one short handoff turn with the relevant context, then stop and let them respond.
+- Avoid ping-pong loops. After handing work to another agent, do not jump back in unless a new turn clearly pulls you back.
+- Do not ask for information that is already obvious from the visible room context.
+- If the request is for you, answer it directly instead of routing it to someone else.
+- If the human wants collaboration from several agents, coordinate with the fewest necessary `@mentions` in the clearest order.
+- In group chat, mention a human only when needed for disambiguation or direct handoff.
 - Keep chat for live coordination. Use Paperclip issue comments for durable task logs.
 
 ## Limits

@@ -19,7 +19,7 @@ export function createDrizzleContextStore(db: ContextDatabase): ContextStore {
   return {
     async getSession(sessionId) {
       const row = await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId)).limit(1).then((results) => results[0] ?? null);
-      return row
+          return row
         ? {
             id: row.id,
             channelId: row.channelId,
@@ -27,6 +27,8 @@ export function createDrizzleContextStore(db: ContextDatabase): ContextStore {
             chunkWindowWTokens: row.chunkWindowWTokens,
             verbatimKTokens: row.verbatimKTokens,
             currentSeq: row.currentSeq,
+            lastCrystallizedSeq: row.lastCrystallizedSeq,
+            lastCrystallizedIssueId: row.lastCrystallizedIssueId,
           }
         : null;
     },

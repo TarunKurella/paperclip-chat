@@ -15,8 +15,10 @@ export function Sidebar(props: {
   notifications: Notification[];
   previewsByChannel: Record<string, SidebarPreview>;
   usingFallbackChannels: boolean;
+  canCreateChannel: boolean;
   canCreateDm: boolean;
   onSelectChannel(channelId: string): void;
+  onCreateChannel(): void;
   onCreateDm(): void;
 }) {
   const pendingChannelIds = new Set(
@@ -31,57 +33,31 @@ export function Sidebar(props: {
   const grouped = [
     {
       label: "Channels",
-      channels: props.channels.filter((channel) => channel.type === "company_general" || channel.type === "project"),
+      channels: props.channels.filter(
+        (channel) => channel.type === "company_general" || channel.type === "project" || channel.type === "task_thread",
+      ),
     },
     {
       label: "Direct Messages",
       channels: props.channels.filter((channel) => channel.type === "dm"),
     },
-    {
-      label: "Threads",
-      channels: props.channels.filter((channel) => channel.type === "task_thread"),
-    },
-  ].filter((group) => group.channels.length > 0);
+  ];
 
   return (
-    <aside className="rounded-lg border border-stone-200 bg-white shadow-sm">
-      <div className="border-b border-stone-200 px-5 py-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">Channels</p>
-            <h2 className="mt-1 text-lg font-semibold">Conversation Surface</h2>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              disabled={!props.canCreateDm}
-              onClick={props.onCreateDm}
-              className={cn(
-                "rounded-md border px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.14em] transition",
-                props.canCreateDm
-                  ? "border-stone-200 bg-stone-50 text-stone-700 hover:bg-stone-100"
-                  : "border-stone-200 bg-stone-50 text-stone-400",
-              )}
-            >
-              New DM
-            </button>
-            <span className="rounded-sm bg-stone-100 px-2.5 py-1 text-xs font-medium text-stone-600">
-              {props.channels.length}
-            </span>
-          </div>
-        </div>
-        {props.usingFallbackChannels ? (
-          <p className="mt-3 text-sm leading-6 text-stone-500">
-            Showing local preview channels until a live company context is available.
-          </p>
-        ) : null}
+    <aside className="flex h-full flex-col overflow-y-auto bg-white">
+      <div className="flex h-12 shrink-0 items-center justify-between px-3">
+        <span className="text-sm font-bold text-stone-900">Messages</span>
+        <span className="text-[10px] font-mono text-stone-400">{props.channels.length}</span>
       </div>
+      {props.usingFallbackChannels ? (
+        <p className="px-3 pb-2 text-xs text-stone-400">Preview mode</p>
+      ) : null}
 
-      <div className="space-y-4 px-3 py-3">
+      <div className="flex-1 space-y-3 px-2 py-2">
         {pendingChannels.length > 0 ? (
-          <section className="rounded-md border border-amber-200 bg-amber-50 px-3 py-3">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-700">
-              Pending agent requests
+          <section className="px-1">
+            <p className="px-2 py-1.5 text-[10px] font-medium uppercase tracking-widest font-mono text-amber-600/80">
+              Pending requests
             </p>
             <div className="mt-2 space-y-1">
               {pendingChannels.map((channel) => (
@@ -102,7 +78,35 @@ export function Sidebar(props: {
 
         {grouped.map((group) => (
           <section key={group.label}>
-            <p className="px-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-stone-500">{group.label}</p>
+            <div className="flex items-center justify-between px-2 py-1.5">
+              <p className="text-[10px] font-medium uppercase tracking-widest font-mono text-stone-400">{group.label}</p>
+              {group.label === "Channels" ? (
+                <button
+                  type="button"
+                  disabled={!props.canCreateChannel}
+                  onClick={props.onCreateChannel}
+                  className={cn(
+                    "text-[11px] font-medium transition-colors",
+                    props.canCreateChannel ? "text-stone-500 hover:text-stone-900" : "text-stone-300",
+                  )}
+                >
+                  + Channel
+                </button>
+              ) : null}
+              {group.label === "Direct Messages" ? (
+                <button
+                  type="button"
+                  disabled={!props.canCreateDm}
+                  onClick={props.onCreateDm}
+                  className={cn(
+                    "text-[11px] font-medium transition-colors",
+                    props.canCreateDm ? "text-stone-500 hover:text-stone-900" : "text-stone-300",
+                  )}
+                >
+                  + DM
+                </button>
+              ) : null}
+            </div>
             <div className="mt-2 space-y-1">
               {group.channels.map((channel) => (
                 <SidebarRow
@@ -115,6 +119,11 @@ export function Sidebar(props: {
                   onClick={() => props.onSelectChannel(channel.id)}
                 />
               ))}
+              {group.channels.length === 0 ? (
+                <p className="px-2 py-2 text-[12px] text-stone-400">
+                  {group.label === "Direct Messages" ? "No direct messages yet." : "No channels yet."}
+                </p>
+              ) : null}
             </div>
           </section>
         ))}
@@ -137,8 +146,8 @@ function SidebarRow(props: {
       type="button"
       onClick={props.onClick}
       className={cn(
-        "flex w-full items-start gap-2.5 rounded-md border border-transparent px-3 py-2 text-left transition",
-        props.selected ? "border-stone-200 bg-stone-100" : props.emphasized ? "hover:bg-amber-100/80" : "hover:bg-stone-50",
+        "flex w-full items-start gap-2.5 px-2 py-2 text-left transition-colors",
+        props.selected ? "bg-stone-100 text-stone-900" : props.emphasized ? "text-stone-800 hover:bg-amber-50/60" : "text-stone-700 hover:bg-stone-50",
       )}
     >
       <div className={cn("mt-1 h-2.5 w-2.5 rounded-full", props.unreadCount > 0 ? "bg-blue-500" : props.hasSession ? "bg-green-500" : "bg-gray-400")} />
@@ -149,7 +158,7 @@ function SidebarRow(props: {
               {props.channel.name}
             </p>
             {props.hasSession ? (
-              <span className="rounded-sm border border-stone-200 bg-white px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.14em] text-stone-500">
+              <span className="rounded-full bg-green-50 px-1.5 py-0.5 text-[10px] font-medium text-green-600">
                 live
               </span>
             ) : null}
@@ -159,14 +168,14 @@ function SidebarRow(props: {
               <span className="text-[11px] font-medium text-stone-400">{props.preview.timestamp}</span>
             ) : null}
             {props.unreadCount > 0 ? (
-              <span className="rounded-sm bg-blue-500 px-2 py-0.5 text-[11px] font-semibold text-white">
+              <span className="rounded-full bg-blue-600 px-1.5 py-0.5 text-[10px] font-medium leading-none text-white">
                 {props.unreadCount}
               </span>
             ) : null}
-            <ChevronRight className="h-4 w-4 shrink-0 text-stone-400" />
+            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-stone-300" />
           </div>
         </div>
-        <p className="mt-1 text-xs uppercase tracking-[0.16em] text-stone-500">{props.channel.type.replace("_", " ")}</p>
+        <p className="mt-0.5 text-[10px] font-mono uppercase tracking-widest text-stone-400">{props.channel.type.replace("_", " ")}</p>
         <p className="mt-1.5 line-clamp-2 text-[13px] leading-5 text-stone-500">
           {props.preview?.body ?? defaultPreview(props.channel)}
         </p>
@@ -180,7 +189,7 @@ function defaultPreview(channel: Channel): string {
     return "Direct conversation ready for live follow-up.";
   }
   if (channel.type === "task_thread") {
-    return "Threaded task discussion will appear here.";
+    return "Custom channel ready for a focused group conversation.";
   }
   return "Live channel transcript hydrates when the session is opened.";
 }

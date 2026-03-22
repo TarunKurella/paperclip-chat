@@ -47,7 +47,7 @@ export class ChunkWorker {
     }
 
     const chunks = await this.store.listChunks(sessionId);
-    const lastChunkEnd = chunks[chunks.length - 1]?.chunkEnd ?? 0;
+    const lastChunkEnd = Math.max(chunks[chunks.length - 1]?.chunkEnd ?? 0, session.lastCrystallizedSeq ?? 0);
     const turns = await this.store.listTurnsForRange(sessionId, {
       fromSeq: lastChunkEnd + 1,
       toSeq: session.currentSeq,

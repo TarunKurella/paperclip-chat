@@ -27,6 +27,7 @@ export const CHAT_EVENT_TYPES = {
   SESSION_DECISION: "session.decision",
   SESSION_SUMMARY: "session.summary",
   SESSION_TOKENS: "session.tokens",
+  SESSION_CRYSTALLIZED: "session.crystallized",
   SESSION_CLOSED: "session.closed",
   NOTIFICATION_NEW: "notification.new",
 } as const;

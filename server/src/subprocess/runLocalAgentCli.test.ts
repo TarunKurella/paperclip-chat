@@ -23,6 +23,9 @@ describe("runLocalAgentCli", () => {
           CHAT_API_URL: "http://127.0.0.1:4000",
           CHAT_API_TOKEN: "token",
           CHAT_SESSION_ID: "session-1",
+          PAPERCLIP_AGENT_ID: "agent-1",
+          PAPERCLIP_AGENT_NAME: "tester",
+          PAPERCLIP_COMPANY_ID: "company-1",
           TEST_CAPTURE_ARGS: fixture.argsPath,
           TEST_CAPTURE_STDIN: fixture.stdinPath,
         },
@@ -30,6 +33,7 @@ describe("runLocalAgentCli", () => {
       },
       {
         ...process.env,
+        HOME: fixture.homeDir,
         CHAT_CODEX_COMMAND: fixture.commandPath,
       },
     );
@@ -37,6 +41,10 @@ describe("runLocalAgentCli", () => {
     expect(result.stream).toEqual([{ type: "delta", delta: "hello from codex" }]);
     expect(await readFile(fixture.argsPath, "utf8")).toContain("--dangerously-bypass-approvals-and-sandbox");
     const stdin = await readFile(fixture.stdinPath, "utf8");
+    expect(stdin).toContain("You are the Paperclip agent tester.");
+    expect(stdin).toContain("Do not identify yourself as Codex, Claude, or a generic AI assistant.");
+    expect(stdin).toContain("You are tester. Speak casually.");
+    expect(stdin).toContain("The above agent instructions were loaded from");
     expect(stdin).toContain("paperclip-chat protocol:");
     expect(stdin).toContain("Reply by sending your response through the chat API");
     expect(stdin).toContain("How are you?");
@@ -79,6 +87,7 @@ describe("runLocalAgentCli", () => {
 async function createFixture(kind: "codex" | "claude") {
   const root = await mkdtemp(path.join(os.tmpdir(), `paperclip-chat-${kind}-`));
   tempDirs.push(root);
+  const homeDir = path.join(root, "home");
   const workspaceDir = path.join(root, "workspace");
   const argsPath = path.join(root, "args.txt");
   const stdinPath = path.join(root, "stdin.txt");
@@ -94,9 +103,16 @@ async function createFixture(kind: "codex" | "claude") {
   await writeFile(argsPath, "", "utf8");
   await writeFile(stdinPath, "", "utf8");
   await mkdir(workspaceDir, { recursive: true });
+  await mkdir(path.join(homeDir, ".paperclip", "instances", "default", "companies", "company-1", "agents", "agent-1", "instructions"), { recursive: true });
+  await writeFile(
+    path.join(homeDir, ".paperclip", "instances", "default", "companies", "company-1", "agents", "agent-1", "instructions", "AGENTS.md"),
+    "You are tester. Speak casually.",
+    "utf8",
+  );
 
   return {
     root,
+    homeDir,
     workspaceDir,
     commandPath,
     argsPath,

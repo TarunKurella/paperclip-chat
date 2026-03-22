@@ -27,6 +27,8 @@ export class InMemorySessionRepository implements SessionRepository, TrunkStore,
       chunkWindowWTokens: CHAT_DEFAULTS.T_WINDOW,
       verbatimKTokens: CHAT_DEFAULTS.K_TOKENS,
       currentSeq: 0,
+      lastCrystallizedSeq: null,
+      lastCrystallizedIssueId: null,
     };
 
     this.sessions.set(session.id, session);
@@ -43,6 +45,32 @@ export class InMemorySessionRepository implements SessionRepository, TrunkStore,
     const closedSession = { ...session, status: "closed" as const };
     this.sessions.set(sessionId, closedSession);
     return closedSession;
+  }
+
+  async checkpointSession(input: {
+    sessionId: string;
+    lastCrystallizedSeq: number;
+    lastCrystallizedIssueId: string | null;
+  }): Promise<ChatSession | null> {
+    const session = this.sessions.get(input.sessionId);
+    if (!session) {
+      return null;
+    }
+
+    const updatedSession = {
+      ...session,
+      lastCrystallizedSeq: input.lastCrystallizedSeq,
+      lastCrystallizedIssueId: input.lastCrystallizedIssueId,
+    };
+    this.sessions.set(input.sessionId, updatedSession);
+    this.summaries.set(input.sessionId, {
+      sessionId: input.sessionId,
+      text: "",
+      tokenCount: 0,
+      chunkSeqCovered: input.lastCrystallizedSeq,
+      updatedAt: new Date().toISOString(),
+    });
+    return updatedSession;
   }
 
   async getSession(sessionId: string): Promise<ChatSession | null> {

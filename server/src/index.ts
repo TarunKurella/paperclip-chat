@@ -13,7 +13,7 @@ import { ChannelService } from "./channels/service.js";
 import { DbChannelRepository } from "./channels/repository.js";
 import { InMemoryChannelRepository } from "./channels/memoryRepository.js";
 import { ChunkWorker } from "./context/ChunkWorker.js";
-import { summarizeChunkWithCli, summarizeFoldWithCli } from "./context/cliSummarizer.js";
+import { summarizeChunkWithCli, summarizeCrystallizePreviewWithCli, summarizeFoldWithCli } from "./context/cliSummarizer.js";
 import { SummaryFold } from "./context/SummaryFold.js";
 import { createDrizzleContextStore, createInMemoryContextStore } from "./context/store.js";
 import { createDrizzleTrunkStore, TrunkManager, type TrunkStore } from "./context/TrunkManager.js";
@@ -175,6 +175,10 @@ export async function bootstrapServer(envSource: NodeJS.ProcessEnv = process.env
     paperclipClient,
     undefined,
     channelService,
+    {
+      summarize: (turns: Array<{ fromParticipantId: string; content: string }>) =>
+        summarizeCrystallizePreviewWithCli(turns, envSource),
+    },
   );
   const idleSessionCoordinator = new IdleSessionCoordinator(
     sessionManager,
@@ -265,7 +269,7 @@ export async function bootstrapServer(envSource: NodeJS.ProcessEnv = process.env
 
   const staticDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../ui/dist");
   app.use(express.static(staticDir));
-  app.get("/", (_req, res) => {
+  app.get(/^\/(?!api(?:\/|$)).*/, (_req, res) => {
     res.sendFile(path.join(staticDir, "index.html"));
   });
 

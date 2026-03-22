@@ -54,6 +54,8 @@ function createStore(): ContextStore {
     chunkWindowWTokens: 1200,
     verbatimKTokens: 800,
     currentSeq: 4,
+    lastCrystallizedSeq: null,
+    lastCrystallizedIssueId: null,
   };
   const chunks = [
     {

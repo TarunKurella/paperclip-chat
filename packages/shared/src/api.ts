@@ -8,6 +8,7 @@ export const CHAT_API_PATHS = {
   SESSION: (id: string) => `/api/sessions/${id}`,
   SESSION_SEND: (id: string) => `/api/sessions/${id}/send`,
   SESSION_CLOSE: (id: string) => `/api/sessions/${id}/close`,
+  SESSION_PREVIEW: (id: string) => `/api/sessions/${id}/preview`,
   SESSION_TOKENS: (id: string) => `/api/sessions/${id}/tokens`,
   NOTIFICATIONS: "/api/notifications",
   NOTIFICATIONS_READ: "/api/notifications/read",

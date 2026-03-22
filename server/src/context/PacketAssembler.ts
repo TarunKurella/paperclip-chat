@@ -13,6 +13,7 @@ export interface AssemblePacketInput {
   turns: Turn[];
   chunks: TrunkChunk[];
   globalSummary?: SessionSummary | null;
+  contextFloorSeq?: number;
   kTokens?: number;
   packetBudget?: number;
   activeThreshold?: number;
@@ -28,7 +29,9 @@ export function assemblePacket(input: AssemblePacketInput): PacketAssemblyResult
   const kTokens = input.kTokens ?? CHAT_DEFAULTS.K_TOKENS;
   const packetBudget = input.packetBudget ?? CHAT_DEFAULTS.PACKET_BUDGET;
   const activeThreshold = input.activeThreshold ?? CHAT_DEFAULTS.K_ACTIVE_THRESHOLD;
-  const deltaSinceAnchor = input.currentSeq - input.agentState.anchorSeq;
+  const contextFloorSeq = input.contextFloorSeq ?? 0;
+  const effectiveAnchorSeq = Math.max(input.agentState.anchorSeq, contextFloorSeq);
+  const deltaSinceAnchor = input.currentSeq - effectiveAnchorSeq;
   const usedHotShortcut = deltaSinceAnchor <= activeThreshold;
   const mode = input.agentState.status === "absent"
     ? "absent"
@@ -36,7 +39,9 @@ export function assemblePacket(input: AssemblePacketInput): PacketAssemblyResult
       ? "active"
       : "observing";
 
-  const priorTurns = input.turns.filter((turn) => turn.seq < input.triggeringTurn.seq);
+  const priorTurns = input.turns.filter(
+    (turn) => turn.seq > effectiveAnchorSeq && turn.seq < input.triggeringTurn.seq,
+  );
   const tailTurns = buildVerbatimTail(priorTurns, kTokens);
   const tailStartSeq = tailTurns[0]?.seq ?? input.triggeringTurn.seq;
 
@@ -56,9 +61,9 @@ export function assemblePacket(input: AssemblePacketInput): PacketAssemblyResult
     sections.push(input.bootstrapPrompt.trim());
   }
 
-  sections.push(buildContextShiftHeader(input.channelName, input.agentState.anchorSeq));
+  sections.push(buildContextShiftHeader(input.channelName, effectiveAnchorSeq));
 
-  if (mode === "absent" && input.globalSummary?.text) {
+  if (mode === "absent" && contextFloorSeq === 0 && input.globalSummary?.text) {
     sections.push(`[SUMMARY]\n${input.globalSummary.text}`);
   }
 
@@ -133,6 +138,7 @@ function applyPacketBudget(
 function buildContextShiftHeader(channelName: string, anchorSeq: number): string {
   return [
     `You are currently in a group chat via paperclip-chat (channel: #${channelName}).`,
+    "This is a shared live room with humans and other agents. Stay in-role as a participant, not a generic assistant session.",
     `You were last active at turn ${anchorSeq}. Here is what you missed:`,
   ].join("\n");
 }
@@ -145,9 +151,25 @@ function formatTail(turns: Turn[]): string {
   return [
     "[Recent turns verbatim]",
     ...turns.map((turn) => `${turn.fromParticipantId}: ${turn.content}`),
+    "[Guidance]",
+    "- Respond to the current room state, not to an imaginary standalone user prompt.",
+    "- Mention another participant only if you want them to act next.",
+    "- If you are speaking to another agent in the room, use their @handle explicitly.",
+    "- If the human asked you to ask another participant something, direct the question to that participant with @handle.",
+    "- Do not create back-and-forth handoff loops after another agent has already taken over.",
+    "- Answer directly when the room is already asking you, and hand off only when there is a real reason.",
   ].join("\n");
 }
 
 function formatTriggeringMessage(senderName: string, agentName: string, content: string): string {
-  return `[${senderName} @${agentName}]: ${content}`;
+  return [
+    `[Latest turn for ${agentName}]`,
+    `From: ${senderName}`,
+    `Content: ${content}`,
+    "Reply as a participant in this room.",
+    "If you are addressing another agent in group chat, use their @handle explicitly.",
+    "If the latest human turn asked you to ask another participant something, ask that participant directly with @handle.",
+    "Do not create unnecessary handoff loops or duplicate asks that are already answered in the room.",
+    "If another agent should take over, use one clear @mention plus the minimum context they need.",
+  ].join("\n");
 }

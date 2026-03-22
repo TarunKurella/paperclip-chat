@@ -24,6 +24,43 @@ describe("SessionManager", () => {
     expect(fixture.debounce.enqueue).toHaveBeenCalledWith("agent-1", "session-1", turn);
   });
 
+  it("resolves agent-authored @mentions from participant handles in group chat", async () => {
+    const fixture = createFixture({
+      participants: [
+        { participantId: "human-1", participantType: "human", companyId: "company-1", displayName: "Board", mentionLabel: "board" },
+        { participantId: "agent-1", participantType: "agent", companyId: "company-1", displayName: "tester", mentionLabel: "tester" },
+      ],
+      companyAgents: [
+        { id: "agent-1", companyId: "company-1", name: "tester", urlKey: "tester" },
+        { id: "agent-2", companyId: "company-1", name: "Singer", urlKey: "singer" },
+      ],
+      agentStates: [
+        makeAgentState("agent-1"),
+        makeAgentState("agent-2"),
+      ],
+      turn: {
+        ...makeTurn(),
+        fromParticipantId: "agent-1",
+        content: "@Singer can you give a song?",
+      },
+    });
+
+    const turn = await fixture.manager.processTurn({
+      sessionId: "session-1",
+      fromParticipantId: "agent-1",
+      fromParticipantType: "agent",
+      content: "@Singer can you give a song?",
+      mentionedIds: [],
+    });
+
+    expect(fixture.trunkManager.insertTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mentionedIds: ["agent-2"],
+      }),
+    );
+    expect(fixture.debounce.enqueue).toHaveBeenCalledWith("agent-2", "session-1", turn);
+  });
+
   it("opens a session and creates agent states for agent participants", async () => {
     const fixture = createFixture({
       channel: {
@@ -170,6 +207,21 @@ describe("SessionManager", () => {
       "session-1",
       expect.stringContaining("Folded summary for crystallize"),
     );
+    expect(fixture.repository.checkpointSession).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      lastCrystallizedSeq: 1,
+      lastCrystallizedIssueId: "issue-1",
+    });
+    expect(fixture.repository.closeSession).not.toHaveBeenCalled();
+    expect(fixture.hub.broadcast).toHaveBeenCalledWith("channel-1", {
+      type: CHAT_EVENT_TYPES.SESSION_CRYSTALLIZED,
+      payload: {
+        sessionId: "session-1",
+        paperclipIssueId: "issue-1",
+        lastCrystallizedSeq: 1,
+      },
+    });
+    expect(result.session.status).toBe("active");
     expect(result.paperclipIssueId).toBe("issue-1");
   });
 
@@ -432,6 +484,7 @@ function createFixture(overrides: Partial<FixtureOptions> = {}) {
   const repository = {
     createSession: vi.fn().mockResolvedValue(session ?? makeSession()),
     closeSession: vi.fn().mockResolvedValue(session),
+    checkpointSession: vi.fn().mockResolvedValue(session),
     getSession: vi.fn().mockResolvedValue(session),
     listActiveSessions: vi.fn().mockResolvedValue(overrides.sessions ?? (session ? [session] : [])),
     getTokensSinceLastChunk: vi.fn().mockResolvedValue(overrides.tokensSinceLastChunk ?? 0),
@@ -521,6 +574,8 @@ function makeSession(): ChatSession {
     chunkWindowWTokens: CHAT_DEFAULTS.T_WINDOW,
     verbatimKTokens: CHAT_DEFAULTS.K_TOKENS,
     currentSeq: 1,
+    lastCrystallizedSeq: null,
+    lastCrystallizedIssueId: null,
   };
 }
 

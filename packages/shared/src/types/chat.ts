@@ -45,6 +45,8 @@ export interface ChatSession {
   chunkWindowWTokens: number;
   verbatimKTokens: number;
   currentSeq: number;
+  lastCrystallizedSeq: number | null;
+  lastCrystallizedIssueId: string | null;
 }
 
 export interface Turn {

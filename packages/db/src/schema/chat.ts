@@ -51,6 +51,8 @@ export const chatSessions = pgTable("chat_sessions", {
   chunkWindowWTokens: integer("chunk_window_w_tokens").notNull().default(1200),
   verbatimKTokens: integer("verbatim_k_tokens").notNull().default(800),
   currentSeq: integer("current_seq").notNull().default(0),
+  lastCrystallizedSeq: integer("last_crystallized_seq"),
+  lastCrystallizedIssueId: uuid("last_crystallized_issue_id"),
 });
 
 export const turns = pgTable(

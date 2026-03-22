@@ -4,10 +4,10 @@ export function StatusPill(props: { label: string; value: string; tone: "green" 
   const toneClass = props.tone === "green" ? "bg-green-500" : "bg-amber-500";
 
   return (
-    <div className="flex items-center gap-2 rounded-md border border-stone-200 bg-white px-3 py-1.5 shadow-sm">
-      <span className={cn("h-2 w-2 rounded-full", toneClass)} />
-      <span className="text-xs font-semibold uppercase tracking-[0.16em] text-stone-500">{props.label}</span>
-      <span className="text-sm font-medium text-stone-700">{props.value}</span>
+    <div className="flex items-center gap-2 px-2 py-1">
+      <span className={cn("h-1.5 w-1.5 rounded-full", toneClass)} />
+      <span className="text-[10px] font-medium uppercase tracking-widest font-mono text-stone-400">{props.label}</span>
+      <span className="text-xs font-medium text-stone-600">{props.value}</span>
     </div>
   );
 }

@@ -39,8 +39,12 @@ function Shell() {
   const [mobileActivityOpen, setMobileActivityOpen] = useState(false);
   const [newDmOpen, setNewDmOpen] = useState(false);
   const [newDmParticipantId, setNewDmParticipantId] = useState<string | null>(null);
+  const [newChannelOpen, setNewChannelOpen] = useState(false);
+  const [newChannelName, setNewChannelName] = useState("");
+  const [newChannelParticipantIds, setNewChannelParticipantIds] = useState<string[]>([]);
   const [visibleEntryCount, setVisibleEntryCount] = useState(20);
   const [crystallizedIssueId, setCrystallizedIssueId] = useState<string | null>(null);
+  const [crystallizeFeedback, setCrystallizeFeedback] = useState<string | null>(null);
   const [crystallizeConfirmOpen, setCrystallizeConfirmOpen] = useState(false);
   const [hasOlderHistory, setHasOlderHistory] = useState(false);
   const healthQuery = useQuery({
@@ -144,6 +148,33 @@ function Shell() {
       });
     },
   });
+  const createChannelMutation = useMutation({
+    mutationFn: async (input: { companyId: string; name: string; participants: SessionParticipant[] }) =>
+      requestJson<Channel>(CHAT_API_PATHS.CHANNELS, {
+        method: "POST",
+        body: JSON.stringify({
+          type: "task_thread",
+          companyId: input.companyId,
+          name: input.name,
+          participants: input.participants.map((participant) => ({
+            participantType: participant.participantType,
+            participantId: participant.participantId,
+          })),
+        }),
+      }),
+    onSuccess: (channel) => {
+      queryClient.setQueryData<Channel[]>(["channels", companyId], (current) => {
+        const existing = current ?? [];
+        return existing.some((entry) => entry.id === channel.id) ? existing : [...existing, channel];
+      });
+      setNewChannelOpen(false);
+      setNewChannelName("");
+      setNewChannelParticipantIds([]);
+      startTransition(() => {
+        navigate(`/channels/${channel.id}${location.search}`);
+      });
+    },
+  });
   const sendMessageMutation = useMutation({
     mutationFn: async (input: { sessionId: string; channelId: string; text: string; mentionedIds: string[] }) =>
       requestJson<{ turn: Turn }>(CHAT_API_PATHS.SESSION_SEND(input.sessionId), {
@@ -190,6 +221,11 @@ function Shell() {
         }),
       );
       setCrystallizedIssueId(result.paperclipIssueId ?? null);
+      setCrystallizeFeedback(
+        result.paperclipIssueId
+          ? `Created Paperclip issue ${result.paperclipIssueId}. Conversation remains open and new agent context will start after this checkpoint.`
+          : "Crystallized this chat into a new checkpoint. Conversation remains open and future agent context starts after it.",
+      );
     },
   });
   const messagesQuery = useQuery({
@@ -228,9 +264,15 @@ function Shell() {
     queryFn: async () =>
       requestJson<{ participants: SessionParticipant[] }>(`${CHAT_API_PATHS.SESSION(selectedSessionId!)}/participants`),
   });
+  const crystallizePreviewQuery = useQuery({
+    queryKey: ["crystallize-preview", selectedSessionId],
+    enabled: Boolean(selectedSessionId && crystallizeConfirmOpen),
+    queryFn: async () =>
+      requestJson<{ summaryText: string | null; decisionText: string | null }>(CHAT_API_PATHS.SESSION_PREVIEW(selectedSessionId!)),
+  });
   const companyDirectoryQuery = useQuery({
     queryKey: ["company-directory", companyId],
-    enabled: Boolean(companyId && newDmOpen),
+    enabled: Boolean(companyId && (newDmOpen || newChannelOpen)),
     queryFn: async () =>
       requestJson<{ participants: SessionParticipant[] }>(CHAT_API_PATHS.COMPANY_DIRECTORY(companyId!)),
   });
@@ -246,6 +288,7 @@ function Shell() {
   useEffect(() => {
     setMobileSidebarOpen(false);
     setCrystallizedIssueId(null);
+    setCrystallizeFeedback(null);
     setStreamingEntry(null);
     setTypingAgents([]);
   }, [location.pathname, location.search]);
@@ -257,16 +300,29 @@ function Shell() {
   }, [newDmOpen]);
 
   useEffect(() => {
+    if (!newChannelOpen) {
+      setNewChannelName("");
+      setNewChannelParticipantIds([]);
+    }
+  }, [newChannelOpen]);
+
+  useEffect(() => {
     setHasOlderHistory(false);
   }, [selectedSessionId]);
 
-  const liveEntries = (messagesQuery.data?.turns ?? []).map(mapTurnToEntry);
   const sessionState = sessionStateQuery.data?.session ?? null;
   const agentStates = sessionStateQuery.data?.agentStates ?? [];
   const sessionSummary = sessionStateQuery.data?.summary ?? null;
+  useEffect(() => {
+    setCrystallizedIssueId(sessionState?.lastCrystallizedIssueId ?? null);
+  }, [sessionState?.id, sessionState?.lastCrystallizedIssueId]);
   const tokenTurns = tokenUsageQuery.data?.turns ?? [];
   const totalTokenCount = tokenTurns.reduce((sum, turn) => sum + turn.tokenCount, 0);
   const sessionClosed = sessionState?.status === "closed";
+  const participantNames = buildParticipantNameMap(sessionParticipantsQuery.data?.participants ?? []);
+  const liveEntries = (messagesQuery.data?.turns ?? []).map((turn) => mapTurnToEntry(turn, participantNames));
+  const latestTurnSeq = (messagesQuery.data?.turns ?? []).at(-1)?.seq ?? null;
+  const displayedSeq = latestTurnSeq ?? sessionState?.currentSeq ?? 0;
   const previewEntries: ThreadEntry[] = buildThreadPreview(
     selectedChannel,
     optimisticMessages[selectedChannel?.id ?? ""] ?? [],
@@ -278,6 +334,9 @@ function Shell() {
   const dmDirectoryEntries = companyDirectoryQuery.data?.participants ?? [];
   const selectedDmParticipant =
     dmDirectoryEntries.find((participant) => participant.participantId === newDmParticipantId) ?? null;
+  const selectedChannelParticipants = dmDirectoryEntries.filter((participant) =>
+    newChannelParticipantIds.includes(participant.participantId),
+  );
   const previewsByChannel = Object.fromEntries(
     channels.map((channel) => {
       const preview = channel.id === selectedChannel?.id
@@ -343,7 +402,7 @@ function Shell() {
           return;
         }
 
-        setLiveDecision(mapTurnToEntry(turn));
+        setLiveDecision(mapTurnToEntry(turn, participantNames));
         return;
       }
 
@@ -365,6 +424,34 @@ function Shell() {
         return;
       }
 
+      if (envelope.type === "session.crystallized") {
+        const crystallized = readSessionCrystallizedPayload(envelope.payload);
+        if (!crystallized || !selectedSessionId || crystallized.sessionId !== selectedSessionId) {
+          return;
+        }
+
+        setCrystallizedIssueId(crystallized.paperclipIssueId);
+        setCrystallizeFeedback(
+          crystallized.paperclipIssueId
+            ? `Created Paperclip issue ${crystallized.paperclipIssueId}. Conversation remains open and new agent context will start after this checkpoint.`
+            : "Crystallized this chat into a new checkpoint. Conversation remains open and future agent context starts after it.",
+        );
+        queryClient.setQueryData<{ session: ChatSession; agentStates: AgentChannelState[]; summary: SessionSummary | null }>(
+          ["session", selectedSessionId],
+          (current) => current
+            ? {
+                ...current,
+                session: {
+                  ...current.session,
+                  lastCrystallizedSeq: crystallized.lastCrystallizedSeq,
+                  lastCrystallizedIssueId: crystallized.paperclipIssueId,
+                },
+              }
+            : undefined,
+        );
+        return;
+      }
+
       if (envelope.type === "chat.message.stream") {
         const stream = readStreamPayload(envelope.payload);
         if (!stream || !selectedChannel || !selectedSessionId) {
@@ -380,7 +467,7 @@ function Shell() {
         setTypingAgents((current) => current.includes(stream.participantId) ? current : [...current, stream.participantId]);
         setStreamingEntry((current) => ({
           id: current?.id ?? `stream-${stream.participantId}`,
-          author: `Agent ${stream.participantId.slice(0, 6)}`,
+          author: resolveParticipantName(stream.participantId, participantNames),
           kind: "agent",
           timestamp: "live",
           body: `${current?.body ?? ""}${stream.delta}`,
@@ -501,12 +588,14 @@ function Shell() {
               notifications={notifications}
               previewsByChannel={previewsByChannel}
               usingFallbackChannels={usingFallbackChannels}
+              canCreateChannel={Boolean(companyId) && !usingFallbackChannels}
               canCreateDm={Boolean(companyId) && !usingFallbackChannels}
               onSelectChannel={(channelId) =>
                 startTransition(() => {
                   navigate(`/channels/${channelId}${location.search}`);
                 })
               }
+              onCreateChannel={() => setNewChannelOpen(true)}
               onCreateDm={() => setNewDmOpen(true)}
             />
           </div>
@@ -519,7 +608,7 @@ function Shell() {
                 </h2>
                 {selectedSessionId ? (
                   <span className="text-[10px] font-mono text-stone-400">
-                    seq {sessionState?.currentSeq ?? 0}
+                    seq {displayedSeq}
                   </span>
                 ) : null}
                 {sessionClosed ? (
@@ -529,24 +618,16 @@ function Shell() {
                 ) : null}
               </div>
               <div className="flex items-center gap-2">
-                {agentStates.map((state) => (
-                  <span
-                    key={state.id}
-                    className="inline-flex items-center gap-1.5 text-xs text-stone-500"
+                {selectedSessionId && !usingFallbackChannels ? (
+                  <button
+                    type="button"
+                    onClick={() => setCrystallizeConfirmOpen(true)}
+                    disabled={sessionClosed || closeSessionMutation.isPending}
+                    className="px-2 py-1 text-xs font-medium text-stone-500 transition-colors hover:text-stone-900 disabled:text-stone-300"
                   >
-                    <span className={cn("h-1.5 w-1.5 rounded-full", agentStateToneClass(state.status))} />
-                    {state.participantId.slice(0, 6)}
-                  </span>
-                ))}
-                {Object.entries(presenceByAgent).map(([agentId, presence]) => (
-                  <span
-                    key={agentId}
-                    className="inline-flex items-center gap-1.5 text-xs text-stone-500"
-                  >
-                    <span className={cn("h-1.5 w-1.5 rounded-full", presenceToneClass(presence.status))} />
-                    {agentId.slice(0, 6)}
-                  </span>
-                ))}
+                    {closeSessionMutation.isPending ? "Crystallizing…" : "Crystallize"}
+                  </button>
+                ) : null}
                 {selectedSessionId && !usingFallbackChannels ? (
                   <button
                     type="button"
@@ -573,8 +654,10 @@ function Shell() {
               summaryTokenCount={sessionSummary?.tokenCount ?? null}
               crystallizing={closeSessionMutation.isPending}
               crystallizedIssueId={crystallizedIssueId}
+              crystallizeFeedback={crystallizeFeedback}
               streamingEntry={streamingEntry}
               typingAgents={typingAgents}
+              participantNames={participantNames}
               entries={previewEntries}
               visibleCount={visibleEntryCount}
               hasOlderHistory={hasOlderHistory}
@@ -696,12 +779,17 @@ function Shell() {
               notifications={notifications}
               previewsByChannel={previewsByChannel}
               usingFallbackChannels={usingFallbackChannels}
+              canCreateChannel={Boolean(companyId) && !usingFallbackChannels}
               canCreateDm={Boolean(companyId) && !usingFallbackChannels}
               onSelectChannel={(channelId) =>
                 startTransition(() => {
                   navigate(`/channels/${channelId}${location.search}`);
                 })
               }
+              onCreateChannel={() => {
+                setMobileSidebarOpen(false);
+                setNewChannelOpen(true);
+              }}
               onCreateDm={() => {
                 setMobileSidebarOpen(false);
                 setNewDmOpen(true);
@@ -834,10 +922,112 @@ function Shell() {
           </div>
         </div>
       ) : null}
+      {newChannelOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 px-4">
+          <div className="w-full max-w-xl rounded-lg border border-stone-200 bg-white p-6 shadow-sm">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">Channel</p>
+                <h2 className="mt-1 text-xl font-semibold text-stone-900">Create custom channel</h2>
+                <p className="mt-2 text-sm leading-6 text-stone-600">
+                  Create a named group channel and pick the agents or humans you want inside it.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setNewChannelOpen(false)}
+                className="rounded-md border border-stone-200 bg-stone-50 p-2 text-stone-600"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="mt-5">
+              <p className="text-sm font-medium text-stone-700">Channel name</p>
+              <input
+                value={newChannelName}
+                onChange={(event) => setNewChannelName(event.target.value)}
+                placeholder="Launch planning"
+                className="mt-3 w-full rounded-md border border-stone-200 bg-white px-4 py-3 text-sm text-stone-900 outline-none transition-colors focus:border-stone-900"
+              />
+            </div>
+            <div className="mt-5">
+              <p className="text-sm font-medium text-stone-700">Choose participants</p>
+              <div className="mt-3 max-h-72 space-y-2 overflow-y-auto">
+                {dmDirectoryEntries.map((participant) => {
+                  const selected = newChannelParticipantIds.includes(participant.participantId);
+                  return (
+                    <button
+                      key={participant.participantId}
+                      type="button"
+                      onClick={() =>
+                        setNewChannelParticipantIds((current) =>
+                          selected
+                            ? current.filter((id) => id !== participant.participantId)
+                            : [...current, participant.participantId],
+                        )
+                      }
+                      className={cn(
+                        "flex w-full items-center justify-between rounded-md border px-4 py-3 text-left transition",
+                        selected
+                          ? "border-stone-900 bg-stone-100"
+                          : "border-stone-200 bg-stone-50 hover:bg-stone-100",
+                      )}
+                    >
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-medium text-stone-900">
+                          {participant.displayName ?? participant.mentionLabel ?? participant.participantId}
+                        </span>
+                        <span className="block truncate text-xs text-stone-500">
+                          @{participant.mentionLabel ?? participant.participantId}
+                        </span>
+                      </span>
+                      <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-stone-500">
+                        {selected ? "added" : participant.participantType}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+              {companyDirectoryQuery.isLoading ? (
+                <p className="mt-3 text-sm text-stone-500">Loading company participants…</p>
+              ) : null}
+              {companyDirectoryQuery.isError ? (
+                <p className="mt-3 text-sm text-red-600">Could not load company participants.</p>
+              ) : null}
+            </div>
+            <div className="mt-5 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setNewChannelOpen(false)}
+                className="rounded-md border border-stone-200 bg-white px-4 py-2 text-sm font-medium text-stone-700"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={!companyId || !newChannelName.trim() || selectedChannelParticipants.length === 0 || createChannelMutation.isPending}
+                onClick={() => {
+                  if (!companyId || !newChannelName.trim() || selectedChannelParticipants.length === 0) {
+                    return;
+                  }
+                  createChannelMutation.mutate({
+                    companyId,
+                    name: newChannelName.trim(),
+                    participants: selectedChannelParticipants,
+                  });
+                }}
+                className="rounded-md bg-stone-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-stone-300"
+              >
+                {createChannelMutation.isPending ? "Creating…" : "Create channel"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       <CrystallizeCard
         open={crystallizeConfirmOpen}
-        summaryText={sessionSummary?.text ?? null}
-        decisionText={latestDecisionEntry?.body ?? null}
+        summaryText={sessionSummary?.text ?? crystallizePreviewQuery.data?.summaryText ?? null}
+        decisionText={latestDecisionEntry?.body ?? crystallizePreviewQuery.data?.decisionText ?? null}
         crystallizing={closeSessionMutation.isPending}
         disabled={!selectedSessionId || sessionClosed}
         onCancel={() => setCrystallizeConfirmOpen(false)}
@@ -864,31 +1054,7 @@ function buildThreadPreview(channel: Channel | null, optimisticEntries: ThreadEn
     return [];
   }
 
-  if (liveEntries.length > 0) {
-    return [...liveEntries, ...optimisticEntries];
-  }
-
-  return [
-    {
-      id: `${channel.id}-1`,
-      author: "Operator",
-      kind: "human" as const,
-      timestamp: "just now",
-      body: `Opened ${channel.name} and prepared the chat surface for live session traffic.`,
-      isDecision: false,
-      tokenCount: null,
-    },
-    {
-      id: `${channel.id}-2`,
-      author: "paperclip-chat",
-      kind: "agent" as const,
-      timestamp: "live",
-      body: "Session routes, token counting, history pagination, and notifications are now wired. Composer send and realtime thread hydration are next.",
-      isDecision: false,
-      tokenCount: null,
-    },
-    ...optimisticEntries,
-  ];
+  return [...liveEntries, ...optimisticEntries];
 }
 
 function dedupeTurns(turns: Turn[]) {
@@ -913,16 +1079,45 @@ function dedupeNotifications(notifications: Notification[]) {
   });
 }
 
-function mapTurnToEntry(turn: Turn): ThreadEntry {
+function mapTurnToEntry(turn: Turn, participantNames: Record<string, string>): ThreadEntry {
   return {
     id: turn.id,
-    author: `Participant ${turn.fromParticipantId.slice(0, 6)}`,
-    kind: turn.fromParticipantId.startsWith("agent") ? "agent" : "human",
+    author: resolveParticipantName(turn.fromParticipantId, participantNames),
+    kind: isLikelyAgentId(turn.fromParticipantId, participantNames[turn.fromParticipantId]) ? "agent" : "human",
     timestamp: new Date(turn.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
     body: turn.content,
     isDecision: turn.isDecision,
     tokenCount: turn.tokenCount,
   };
+}
+
+function buildParticipantNameMap(participants: SessionParticipant[]): Record<string, string> {
+  return Object.fromEntries(
+    participants.map((participant) => [
+      participant.participantId,
+      participant.displayName ?? fallbackParticipantName(participant.participantId, participant.participantType),
+    ]),
+  );
+}
+
+function resolveParticipantName(participantId: string, participantNames: Record<string, string>): string {
+  return participantNames[participantId] ?? fallbackParticipantName(participantId);
+}
+
+function fallbackParticipantName(participantId: string, participantType?: "human" | "agent"): string {
+  if (participantType === "human" || participantId === "11111111-1111-4111-8111-111111111111") {
+    return "You";
+  }
+
+  return `Participant ${participantId.slice(0, 6)}`;
+}
+
+function isLikelyAgentId(participantId: string, displayName?: string): boolean {
+  if (displayName === "You") {
+    return false;
+  }
+
+  return participantId !== "11111111-1111-4111-8111-111111111111";
 }
 
 function readCompanyId() {
@@ -1009,6 +1204,22 @@ function readSessionClosedPayload(value: unknown): string | null {
   return value.sessionId;
 }
 
+function readSessionCrystallizedPayload(value: unknown): {
+  sessionId: string;
+  paperclipIssueId: string | null;
+  lastCrystallizedSeq: number | null;
+} | null {
+  if (!isRecord(value) || typeof value.sessionId !== "string") {
+    return null;
+  }
+
+  return {
+    sessionId: value.sessionId,
+    paperclipIssueId: typeof value.paperclipIssueId === "string" ? value.paperclipIssueId : null,
+    lastCrystallizedSeq: typeof value.lastCrystallizedSeq === "number" ? value.lastCrystallizedSeq : null,
+  };
+}
+
 function readSessionSummaryPayload(value: unknown): SessionSummary | null {
   if (!isRecord(value) || typeof value.sessionId !== "string" || typeof value.text !== "string" || typeof value.tokenCount !== "number") {
     return null;
@@ -1078,6 +1289,34 @@ function agentStateToneClass(status: AgentChannelState["status"]) {
       return "bg-amber-500";
     default:
       return "bg-gray-400";
+  }
+}
+
+function formatPresenceLabel(status: string) {
+  switch (status) {
+    case "idle":
+      return "ready";
+    case "running":
+      return "running";
+    case "busy":
+    case "busy_task":
+    case "busy_dm":
+      return "busy";
+    case "error":
+      return "error";
+    default:
+      return status;
+  }
+}
+
+function formatAgentContextLabel(status: AgentChannelState["status"]) {
+  switch (status) {
+    case "active":
+      return "active in context";
+    case "observing":
+      return "watching context";
+    default:
+      return "not in context";
   }
 }
 

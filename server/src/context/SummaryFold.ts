@@ -84,7 +84,7 @@ export class SummaryFold {
     }
 
     const previous = await this.store.getSummary(sessionId);
-    const fromSeq = (previous?.chunkSeqCovered ?? 0) + 1;
+    const fromSeq = Math.max(previous?.chunkSeqCovered ?? 0, session.lastCrystallizedSeq ?? 0) + 1;
     if (fromSeq > session.currentSeq) {
       return previous;
     }

@@ -26,6 +26,11 @@ export interface SessionParticipant {
 export interface SessionRepository {
   createSession(channelId: string, participants: SessionParticipant[]): Promise<ChatSession>;
   closeSession(sessionId: string): Promise<ChatSession | null>;
+  checkpointSession(input: {
+    sessionId: string;
+    lastCrystallizedSeq: number;
+    lastCrystallizedIssueId: string | null;
+  }): Promise<ChatSession | null>;
   getSession(sessionId: string): Promise<ChatSession | null>;
   listActiveSessions(): Promise<ChatSession[]>;
   getTokensSinceLastChunk(sessionId: string): Promise<number>;
@@ -93,6 +98,11 @@ export interface SessionDetails {
   summary: SessionSummary | null;
 }
 
+export interface CrystallizePreview {
+  summaryText: string | null;
+  decisionText: string | null;
+}
+
 export interface RecoveredSessionState {
   session: ChatSession;
   agentStates: AgentChannelState[];
@@ -105,6 +115,10 @@ export interface CloseSessionResult {
 
 export interface ParaMemoryWriter {
   write(agentIds: string[], sessionId: string, content: string): Promise<void>;
+}
+
+export interface CrystallizePreviewGenerator {
+  summarize(turns: Array<{ fromParticipantId: string; content: string }>): Promise<CrystallizePreview>;
 }
 
 export interface SessionChannelLookup {
@@ -129,6 +143,7 @@ export class SessionManager {
     private readonly paperclipClient?: Pick<PaperclipClient, "getAgent" | "createIssue" | "listCompanyAgents">,
     private readonly paraMemoryWriter: ParaMemoryWriter = new AgentHomeParaMemoryWriter(),
     private readonly channels?: SessionChannelLookup,
+    private readonly previewGenerator?: CrystallizePreviewGenerator,
   ) {}
 
   async openSession(input: OpenSessionInput): Promise<ChatSession> {
@@ -174,6 +189,38 @@ export class SessionManager {
     return this.enrichParticipants(participants, channel ?? null, channel?.type === "company_general" || channel?.type === "project");
   }
 
+  async getCrystallizePreview(sessionId: string): Promise<CrystallizePreview> {
+    const session = await this.repository.getSession(sessionId);
+    if (!session) {
+      throw new SessionNotFoundError(sessionId);
+    }
+
+    const foldedSummary = await this.repository.getSessionSummary(session.id);
+    const turns = await this.repository.listTurns(session.id, { limit: 40 });
+    const explicitDecision = [...turns].reverse().find((turn) => turn.isDecision)?.content ?? null;
+
+    if ((foldedSummary?.text ?? "").trim() && explicitDecision) {
+      return {
+        summaryText: foldedSummary?.text ?? null,
+        decisionText: explicitDecision,
+      };
+    }
+
+    const generated = this.previewGenerator
+      ? await this.previewGenerator.summarize(
+          turns.map((turn) => ({
+            fromParticipantId: turn.fromParticipantId,
+            content: turn.content,
+          })),
+        )
+      : { summaryText: null, decisionText: null };
+
+    return {
+      summaryText: foldedSummary?.text ?? generated.summaryText,
+      decisionText: explicitDecision ?? generated.decisionText,
+    };
+  }
+
   async recoverActiveSessions(): Promise<RecoveredSessionState[]> {
     const sessions = await this.repository.listActiveSessions();
     const recovered = await Promise.all(
@@ -197,6 +244,25 @@ export class SessionManager {
     let paperclipIssueId: string | undefined;
     if (crystallize) {
       paperclipIssueId = await this.crystallizeSession(currentSession);
+      const session = await this.repository.checkpointSession({
+        sessionId,
+        lastCrystallizedSeq: currentSession.currentSeq,
+        lastCrystallizedIssueId: paperclipIssueId ?? null,
+      });
+      if (!session) {
+        throw new SessionNotFoundError(sessionId);
+      }
+
+      this.hub.broadcast(session.channelId, {
+        type: CHAT_EVENT_TYPES.SESSION_CRYSTALLIZED,
+        payload: {
+          sessionId: session.id,
+          paperclipIssueId: paperclipIssueId ?? null,
+          lastCrystallizedSeq: session.lastCrystallizedSeq,
+        },
+      });
+
+      return paperclipIssueId ? { session, paperclipIssueId } : { session };
     }
 
     const session = await this.repository.closeSession(sessionId);
@@ -243,14 +309,15 @@ export class SessionManager {
       throw new SessionNotFoundError(input.sessionId);
     }
 
-    const participants = await this.repository.listSessionParticipants(input.sessionId);
+    const participants = await this.listSessionParticipants(input.sessionId);
     const isDmSession = await this.isDmChannel(session.channelId);
+    const resolvedMentionedIds = resolveMentionedIds(input.content, participants, input.mentionedIds, input.fromParticipantId);
 
     const turn = await this.trunkManager.insertTurn({
       sessionId: input.sessionId,
       fromParticipantId: input.fromParticipantId,
       content: input.content,
-      mentionedIds: input.mentionedIds,
+      mentionedIds: resolvedMentionedIds,
     });
 
     if (isDmSession) {
@@ -295,7 +362,7 @@ export class SessionManager {
     }
 
     const agentStates = await this.repository.listAgentStates(input.sessionId);
-    const mentionedAgents = new Set(input.mentionedIds);
+    const mentionedAgents = new Set(resolvedMentionedIds);
     for (const state of agentStates) {
       if (!mentionedAgents.has(state.participantId)) {
         continue;
@@ -534,14 +601,15 @@ export class SessionManager {
     const participants = await this.repository.listSessionParticipants(session.id);
     const turns = await this.repository.listTurns(session.id, { limit: 200 });
     const foldedSummary = await this.repository.getSessionSummary(session.id);
-    const summary = buildCrystallizeSummary(session, participants, turns, foldedSummary);
+    const channel = await this.channels?.getChannel(session.channelId);
+    const summary = buildCrystallizeSummary(session, channel?.name ?? null, participants, turns, foldedSummary);
     const companyId = participants[0]?.companyId;
 
     let paperclipIssueId: string | undefined;
     if (companyId && this.paperclipClient) {
       const issue = await this.paperclipClient.createIssue(companyId, {
-        title: `[CHAT] ${session.channelId} / ${session.id.slice(0, 8)}`,
-        description: foldedSummary?.text ?? summary,
+        title: `[CHAT] ${channel?.name ?? session.channelId} / ${session.id.slice(0, 8)}`,
+        description: summary,
       });
       paperclipIssueId = issue.id;
     }
@@ -553,6 +621,36 @@ export class SessionManager {
 
     return paperclipIssueId;
   }
+}
+
+function resolveMentionedIds(
+  content: string,
+  participants: SessionParticipant[],
+  explicitMentionedIds: string[],
+  senderId: string,
+): string[] {
+  const resolved = new Set(explicitMentionedIds);
+  const mentionTokens = new Set(
+    [...content.matchAll(/(^|\s)@([a-z0-9][a-z0-9-]*)/gi)]
+      .map((match) => match[2]?.trim().toLowerCase())
+      .filter((value): value is string => Boolean(value)),
+  );
+
+  if (mentionTokens.size === 0) {
+    return [...resolved];
+  }
+
+  for (const participant of participants) {
+    if (participant.participantId === senderId) {
+      continue;
+    }
+    const label = participant.mentionLabel?.trim().toLowerCase();
+    if (label && mentionTokens.has(label)) {
+      resolved.add(participant.participantId);
+    }
+  }
+
+  return [...resolved];
 }
 
 function dedupeParticipants(participants: SessionParticipant[]): SessionParticipant[] {
@@ -609,34 +707,52 @@ function readTaskId(content: string): string | null {
 
 function buildCrystallizeSummary(
   session: ChatSession,
+  channelName: string | null,
   participants: SessionParticipant[],
   turns: Turn[],
   foldedSummary?: SessionSummary | null,
 ): string {
+  const participantLabelById = new Map(
+    participants.map((participant) => [
+      participant.participantId,
+      participant.displayName ?? participant.mentionLabel ?? participant.participantId,
+    ]),
+  );
   const participantLines = participants.length
-    ? participants.map((participant) => `- ${participant.participantType}: ${participant.participantId}`).join("\n")
+    ? participants
+      .map((participant) => `- ${participant.participantType}: ${participant.displayName ?? participant.participantId}`)
+      .join("\n")
     : "- none";
   const decisionTurn = [...turns].reverse().find((turn) => turn.isDecision);
+  const recentHumanAsk = [...turns].reverse().find((turn) => turn.fromParticipantId !== decisionTurn?.fromParticipantId);
   const recentTurns = turns.length
-    ? turns.slice(-10).map((turn) => `- ${turn.fromParticipantId}: ${turn.content}`).join("\n")
+    ? turns
+      .slice(-10)
+      .map((turn) => `- ${participantLabelById.get(turn.fromParticipantId) ?? turn.fromParticipantId}: ${turn.content}`)
+      .join("\n")
     : "- none";
 
   return [
-    "# paperclip-chat crystallize",
+    "# Chat Crystallization",
     "",
-    `Session: ${session.id}`,
-    `Channel: ${session.channelId}`,
+    "## Snapshot",
+    channelName ? `- Channel: ${channelName}` : `- Channel: ${session.channelId}`,
+    `- Session: ${session.id}`,
+    `- Checkpoint: turn ${session.currentSeq}`,
     "",
-    "Summary:",
-    foldedSummary?.text ?? "No folded session summary was available.",
+    "## Summary",
+    foldedSummary?.text || "No folded summary was available yet. This issue was crystallized from the latest live conversation and transcript excerpt.",
     "",
-    "Participants:",
+    "## Participants",
     participantLines,
     "",
-    "Decision:",
-    decisionTurn?.content ?? "No explicit [DECISION] turn was captured.",
+    "## Latest Decision",
+    decisionTurn?.content ?? "No explicit [DECISION] turn was captured in the chat yet.",
     "",
-    "Recent turns:",
+    "## Current Ask",
+    recentHumanAsk?.content ?? "No single explicit ask was isolated from the recent turns.",
+    "",
+    "## Recent Transcript Excerpt",
     recentTurns,
   ].join("\n");
 }

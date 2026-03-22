@@ -1,4 +1,5 @@
 import { mkdtemp, rm } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -86,6 +87,44 @@ describe("Orchestrator", () => {
     expect(current.retrying[0]?.identifier).toBe("paperclip-chat-or3");
     expect(current.codexTotals.totalTokens).toBe(15);
     expect(current.rateLimits).toEqual({ limitId: "codex" });
+  });
+
+  it("executes configured claim and start commands before worker execution", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "paperclip-chat-runtime-"));
+    tempDirs.push(root);
+
+    const workflow: WorkflowDefinition = {
+      path: path.join(root, "WORKFLOW.md"),
+      config: {},
+      promptTemplate: "Do the bead work.",
+    };
+
+    const config = makeConfig(root);
+    const claimedPath = path.join(root, "claimed.txt");
+    const startedPath = path.join(root, "started.txt");
+    config.beads.claimCommandTemplate = `printf claimed > '${claimedPath}'`;
+    config.beads.startCommandTemplate = `printf started > '${startedPath}'`;
+
+    const ready = [bead("paperclip-chat-or3", 0, "2026-03-21T09:00:00Z")];
+    const beadClient = {
+      fetchReadyBeads: async () => ready,
+      fetchBeadsByStatus: async () => ready,
+      fetchBeadStatesByIdsOrIdentifiers: async () => ready,
+    };
+    const workspaceManager = new WorkspaceManager({ root }, { timeoutMs: 5000 });
+
+    const workerRunner: WorkerRunner = async () => ({ reason: "normal" });
+
+    const orchestrator = new Orchestrator(workflow, config, beadClient, workspaceManager, workerRunner);
+    await orchestrator.tick();
+
+    const deadline = Date.now() + 2000;
+    while (Date.now() < deadline && orchestrator.snapshot().retrying.length === 0) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    expect(await readFile(claimedPath, "utf8")).toBe("claimed");
+    expect(await readFile(startedPath, "utf8")).toBe("started");
   });
 });
 
