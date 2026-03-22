@@ -17,6 +17,17 @@ export class DbChannelRepository implements ChannelRepository {
     return rows.map(mapChannelRow);
   }
 
+  async getById(channelId: string): Promise<Channel | null> {
+    const row = await this.db
+      .select()
+      .from(channels)
+      .where(eq(channels.id, channelId))
+      .limit(1)
+      .then((results) => results[0] ?? null);
+
+    return row ? mapChannelRow(row) : null;
+  }
+
   async findCompanyGeneral(companyId: string): Promise<Channel | null> {
     const row = await this.db
       .select()

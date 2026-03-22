@@ -10,6 +10,10 @@ export class InMemoryChannelRepository implements ChannelRepository {
       .sort((left, right) => left.name.localeCompare(right.name));
   }
 
+  async getById(channelId: string): Promise<Channel | null> {
+    return this.channels.get(channelId) ?? null;
+  }
+
   async findCompanyGeneral(companyId: string): Promise<Channel | null> {
     return [...this.channels.values()].find(
       (channel) => channel.companyId === companyId && channel.type === "company_general",

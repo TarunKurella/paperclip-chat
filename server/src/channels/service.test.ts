@@ -9,6 +9,7 @@ describe("ChannelService", () => {
       listByCompany: vi.fn().mockImplementation(async (companyId: string) =>
         [...state.values()].filter((channel) => channel.companyId === companyId),
       ),
+      getById: vi.fn().mockImplementation(async (channelId: string) => state.get(channelId) ?? null),
       findCompanyGeneral: vi.fn().mockImplementation(async (companyId: string) =>
         [...state.values()].find((channel) => channel.companyId === companyId && channel.type === "company_general") ?? null,
       ),

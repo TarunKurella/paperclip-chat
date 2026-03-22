@@ -9,6 +9,7 @@ export interface PaperclipProject {
 
 export interface ChannelRepository {
   listByCompany(companyId: string): Promise<Channel[]>;
+  getById(channelId: string): Promise<Channel | null>;
   findCompanyGeneral(companyId: string): Promise<Channel | null>;
   findProjectChannel(companyId: string, paperclipRefId: string): Promise<Channel | null>;
   create(input: Omit<CreateChannel, "participants">): Promise<Channel>;
@@ -28,6 +29,10 @@ export class ChannelService {
 
   async listChannels(companyId: string): Promise<Channel[]> {
     return this.repository.listByCompany(companyId);
+  }
+
+  async getChannel(channelId: string): Promise<Channel | null> {
+    return this.repository.getById(channelId);
   }
 
   async createChannel(input: Omit<CreateChannel, "participants">): Promise<Channel> {

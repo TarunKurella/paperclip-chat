@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express, { type Express } from "express";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
-import { CHAT_EVENT_TYPES } from "@paperclip-chat/shared";
+import { CHAT_EVENT_TYPES, type Turn } from "@paperclip-chat/shared";
 import { PaperclipWsSubscription } from "./adapters/paperclipWs.js";
 import { PaperclipClient } from "./adapters/paperclipClient.js";
 import { createAuthenticateMiddleware, requireAnyMiddleware, requireHumanMiddleware, requireHumanOrServiceMiddleware } from "./auth/express.js";
@@ -20,6 +20,7 @@ import { DebounceBuffer } from "./session/Debounce.js";
 import { InMemorySessionRepository } from "./session/memoryRepository.js";
 import { SessionManager } from "./session/SessionManager.js";
 import { sessionRoutes } from "./session/routes.js";
+import { WakeupScaffoldManager } from "./wakeup/WakeupScaffoldManager.js";
 import { ChatWsHub } from "./ws/hub.js";
 
 export interface ServerRuntime {
@@ -72,7 +73,25 @@ export async function bootstrapServer(envSource: NodeJS.ProcessEnv = process.env
   const hub = new ChatWsHub(paperclipClient, envSource);
   hub.attach(server);
   const sessionRepository = new InMemorySessionRepository();
-  const debounce = new DebounceBuffer(async () => {});
+  const wakeupManager = new WakeupScaffoldManager(paperclipClient);
+  const debounce = new DebounceBuffer<Turn>(async (agentId, sessionId, turns) => {
+    const session = await sessionRepository.getSession(sessionId);
+    if (!session) {
+      return;
+    }
+
+    const channel = await channelService.getChannel(session.channelId);
+    if (!channel) {
+      return;
+    }
+
+    await wakeupManager.flushMentionBatch({
+      agentId,
+      sessionId,
+      channel,
+      turns,
+    });
+  });
   const sessionManager = new SessionManager(
     new TrunkManager(sessionRepository),
     sessionRepository,
