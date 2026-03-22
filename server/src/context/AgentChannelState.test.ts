@@ -47,6 +47,7 @@ function makeState(overrides: Partial<AgentChannelState> = {}): AgentChannelStat
     participantId: "agent-1",
     status: "active",
     anchorSeq: 0,
+    scaffoldIssueId: null,
     cliSessionId: null,
     cliSessionPath: null,
     idleTurnCount: 0,

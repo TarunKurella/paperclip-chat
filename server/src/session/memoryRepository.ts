@@ -80,6 +80,7 @@ export class InMemorySessionRepository implements SessionRepository, TrunkStore 
       participantId,
       status: "absent",
       anchorSeq: 0,
+      scaffoldIssueId: null,
       cliSessionId: null,
       cliSessionPath: null,
       idleTurnCount: 0,
@@ -102,6 +103,21 @@ export class InMemorySessionRepository implements SessionRepository, TrunkStore 
     );
   }
 
+  async saveScaffoldIssue(sessionId: string, participantId: string, scaffoldIssueId: string): Promise<void> {
+    const states = this.agentStates.get(sessionId) ?? [];
+    this.agentStates.set(
+      sessionId,
+      states.map((state) =>
+        state.participantId === participantId
+          ? {
+              ...state,
+              scaffoldIssueId,
+            }
+          : state,
+      ),
+    );
+  }
+
   async saveRunState(input: {
     sessionId: string;
     participantId: string;
@@ -117,6 +133,7 @@ export class InMemorySessionRepository implements SessionRepository, TrunkStore 
         state.participantId === input.participantId
           ? {
               ...state,
+              scaffoldIssueId: state.scaffoldIssueId,
               cliSessionId: input.cliSessionId,
               cliSessionPath: input.cliSessionPath,
               anchorSeq: input.anchorSeq,

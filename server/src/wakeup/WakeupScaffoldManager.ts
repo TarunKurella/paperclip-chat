@@ -1,4 +1,4 @@
-import type { Channel, Turn } from "@paperclip-chat/shared";
+import type { AgentChannelState, Channel, ChatSession, Turn } from "@paperclip-chat/shared";
 import type { PaperclipClient } from "../adapters/paperclipClient.js";
 
 export interface WakeupBatchInput {
@@ -9,11 +9,44 @@ export interface WakeupBatchInput {
 }
 
 export class WakeupScaffoldManager {
-  private readonly scaffoldIssueIds = new Map<string, string>();
-
   constructor(
     private readonly paperclipClient: Pick<PaperclipClient, "getAgent" | "createIssue" | "checkoutIssue" | "postComment" | "wakeupAgent">,
+    private readonly stateStore: {
+      listAgentStates(sessionId: string): Promise<AgentChannelState[]>;
+      saveScaffoldIssue(sessionId: string, participantId: string, scaffoldIssueId: string): Promise<void>;
+    },
   ) {}
+
+  async ensureSessionScaffold(session: ChatSession, channel: Channel, agentId: string): Promise<boolean> {
+    const agent = await this.paperclipClient.getAgent(agentId);
+    if (agent.adapterType !== "http" && agent.adapterType !== "process") {
+      return false;
+    }
+
+    await this.ensureScaffoldIssue({
+      agentId,
+      sessionId: session.id,
+      channel,
+      turns: [],
+    });
+    return true;
+  }
+
+  async recoverSessionScaffolds(session: ChatSession, channel: Channel): Promise<void> {
+    const states = await this.stateStore.listAgentStates(session.id);
+    for (const state of states) {
+      if (!state.scaffoldIssueId) {
+        continue;
+      }
+
+      const agent = await this.paperclipClient.getAgent(state.participantId);
+      if (agent.adapterType !== "http" && agent.adapterType !== "process") {
+        continue;
+      }
+
+      await this.paperclipClient.checkoutIssue(state.scaffoldIssueId, state.participantId);
+    }
+  }
 
   async flushMentionBatch(input: WakeupBatchInput): Promise<boolean> {
     const agent = await this.paperclipClient.getAgent(input.agentId);
@@ -37,8 +70,7 @@ export class WakeupScaffoldManager {
   }
 
   private async ensureScaffoldIssue(input: WakeupBatchInput): Promise<string> {
-    const key = `${input.agentId}:${input.sessionId}`;
-    const existing = this.scaffoldIssueIds.get(key);
+    const existing = await this.readPersistedIssueId(input.sessionId, input.agentId);
     if (existing) {
       return existing;
     }
@@ -48,8 +80,13 @@ export class WakeupScaffoldManager {
       description: `Scaffold issue for paperclip-chat session ${input.sessionId}.`,
       labels: ["chat-session"],
     });
-    this.scaffoldIssueIds.set(key, issue.id);
+    await this.stateStore.saveScaffoldIssue(input.sessionId, input.agentId, issue.id);
     return issue.id;
+  }
+
+  private async readPersistedIssueId(sessionId: string, agentId: string): Promise<string | null> {
+    const states = await this.stateStore.listAgentStates(sessionId);
+    return states.find((state) => state.participantId === agentId)?.scaffoldIssueId ?? null;
   }
 }
 

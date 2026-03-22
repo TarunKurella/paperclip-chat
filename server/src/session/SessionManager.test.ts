@@ -297,6 +297,7 @@ function createFixture(overrides: Partial<FixtureOptions> = {}) {
     listAgentStates: vi.fn().mockResolvedValue(agentStates),
     createAgentStates: vi.fn().mockResolvedValue(undefined),
     incrementIdleTurnCount: vi.fn().mockResolvedValue(undefined),
+    saveScaffoldIssue: vi.fn().mockResolvedValue(undefined),
     saveRunState: vi.fn().mockResolvedValue(undefined),
   };
   const hub = {
@@ -391,6 +392,7 @@ function makeAgentState(participantId: string): AgentChannelState {
     participantId,
     status: "absent",
     anchorSeq: 0,
+    scaffoldIssueId: null,
     cliSessionId: null,
     cliSessionPath: null,
     idleTurnCount: 0,

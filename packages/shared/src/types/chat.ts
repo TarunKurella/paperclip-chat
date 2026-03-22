@@ -83,6 +83,7 @@ export interface AgentChannelState {
   participantId: string;
   status: AgentChannelStatus;
   anchorSeq: number;
+  scaffoldIssueId: string | null;
   cliSessionId: string | null;
   cliSessionPath: string | null;
   idleTurnCount: number;

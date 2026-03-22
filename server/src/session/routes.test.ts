@@ -79,7 +79,7 @@ describe("sessionRoutes", () => {
     const app = express();
     app.use(express.json());
     app.use(injectPrincipal({ type: "agent", id: "agent-1" }));
-    app.use("/api", sessionRoutes(sessionManager as never, {}, rateLimiter));
+    app.use("/api", sessionRoutes(sessionManager as never, {}, {}, rateLimiter));
 
     const response = await request(app).post("/api/sessions/session-1/send").send({ text: "hello there" });
 

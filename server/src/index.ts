@@ -90,7 +90,7 @@ export async function bootstrapServer(envSource: NodeJS.ProcessEnv = process.env
   const server = createServer(app);
   const hub = new ChatWsHub(paperclipClient, envSource);
   hub.attach(server);
-  const wakeupManager = new WakeupScaffoldManager(paperclipClient);
+  const wakeupManager = new WakeupScaffoldManager(paperclipClient, sessionRepository);
   const debounce = new DebounceBuffer<Turn>(async (agentId, sessionId, turns) => {
     const session = await sessionRepository.getSession(sessionId);
     if (!session) {
@@ -119,7 +119,17 @@ export async function bootstrapServer(envSource: NodeJS.ProcessEnv = process.env
     paperclipClient,
   );
   hub.setReplayProvider((sessionId, lastSeq) => sessionManager.listMessages(sessionId, lastSeq));
-  await sessionManager.recoverActiveSessions();
+  const recoveredSessions = await sessionManager.recoverActiveSessions();
+  await Promise.all(
+    recoveredSessions.map(async ({ session }) => {
+      const channel = await channelService.getChannel(session.channelId);
+      if (!channel) {
+        return;
+      }
+
+      await wakeupManager.recoverSessionScaffolds(session, channel);
+    }),
+  );
 
   app.get("/api/health", (_req, res) => {
     res.json({ status: "ok", paperclip: "connected", ws: "running" });
@@ -138,6 +148,20 @@ export async function bootstrapServer(envSource: NodeJS.ProcessEnv = process.env
     sessionRoutes(sessionManager, {
       authenticate: authenticateMiddleware,
       requireAny: requireAnyMiddleware,
+    }, {
+      onSessionOpened: async (session) => {
+        const channel = await channelService.getChannel(session.channelId);
+        if (!channel) {
+          return;
+        }
+
+        const participants = await sessionManager.listSessionParticipants(session.id);
+        await Promise.all(
+          participants
+            .filter((participant) => participant.participantType === "agent")
+            .map((participant) => wakeupManager.ensureSessionScaffold(session, channel, participant.participantId)),
+        );
+      },
     }),
   );
   app.use(

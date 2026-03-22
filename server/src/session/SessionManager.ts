@@ -32,6 +32,7 @@ export interface SessionRepository {
   listAgentStates(sessionId: string): Promise<AgentChannelState[]>;
   createAgentStates(sessionId: string, participantIds: string[]): Promise<void>;
   incrementIdleTurnCount(sessionId: string, participantIds: string[]): Promise<void>;
+  saveScaffoldIssue(sessionId: string, participantId: string, scaffoldIssueId: string): Promise<void>;
   saveRunState(input: {
     sessionId: string;
     participantId: string;

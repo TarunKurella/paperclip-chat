@@ -105,6 +105,7 @@ export const agentChannelStates = pgTable(
     participantId: uuid("participant_id").notNull(),
     status: agentChannelStatusEnum("status").notNull().default("absent"),
     anchorSeq: integer("anchor_seq").notNull().default(0),
+    scaffoldIssueId: text("scaffold_issue_id"),
     cliSessionId: text("cli_session_id"),
     cliSessionPath: text("cli_session_path"),
     idleTurnCount: integer("idle_turn_count").notNull().default(0),

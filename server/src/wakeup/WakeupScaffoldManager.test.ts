@@ -10,8 +10,25 @@ describe("WakeupScaffoldManager", () => {
       postComment: vi.fn().mockResolvedValue({ id: "comment-1" }),
       wakeupAgent: vi.fn().mockResolvedValue({ status: "ok" }),
     };
+    const stateStore = {
+      listAgentStates: vi.fn().mockResolvedValue([
+        {
+          id: "state-1",
+          sessionId: "session-12345678",
+          participantId: "agent-1",
+          status: "absent",
+          anchorSeq: 0,
+          scaffoldIssueId: null,
+          cliSessionId: null,
+          cliSessionPath: null,
+          idleTurnCount: 0,
+          tokensThisSession: 0,
+        },
+      ]),
+      saveScaffoldIssue: vi.fn().mockResolvedValue(undefined),
+    };
 
-    const manager = new WakeupScaffoldManager(paperclipClient as never);
+    const manager = new WakeupScaffoldManager(paperclipClient as never, stateStore);
     const handled = await manager.flushMentionBatch({
       agentId: "agent-1",
       sessionId: "session-12345678",
@@ -47,6 +64,7 @@ describe("WakeupScaffoldManager", () => {
       }),
     );
     expect(paperclipClient.checkoutIssue).toHaveBeenCalledWith("issue-1", "agent-1");
+    expect(stateStore.saveScaffoldIssue).toHaveBeenCalledWith("session-12345678", "agent-1", "issue-1");
     expect(paperclipClient.postComment).toHaveBeenCalledWith(
       "issue-1",
       expect.objectContaining({
@@ -71,8 +89,12 @@ describe("WakeupScaffoldManager", () => {
       postComment: vi.fn(),
       wakeupAgent: vi.fn(),
     };
+    const stateStore = {
+      listAgentStates: vi.fn().mockResolvedValue([]),
+      saveScaffoldIssue: vi.fn().mockResolvedValue(undefined),
+    };
 
-    const manager = new WakeupScaffoldManager(paperclipClient as never);
+    const manager = new WakeupScaffoldManager(paperclipClient as never, stateStore);
     const handled = await manager.flushMentionBatch({
       agentId: "agent-1",
       sessionId: "session-12345678",
@@ -89,5 +111,53 @@ describe("WakeupScaffoldManager", () => {
     expect(handled).toBe(false);
     expect(paperclipClient.createIssue).not.toHaveBeenCalled();
     expect(paperclipClient.wakeupAgent).not.toHaveBeenCalled();
+  });
+
+  it("re-checks out persisted scaffold issues during recovery", async () => {
+    const paperclipClient = {
+      getAgent: vi.fn().mockResolvedValue({ id: "agent-1", adapterType: "http", name: "Agent" }),
+      createIssue: vi.fn(),
+      checkoutIssue: vi.fn().mockResolvedValue({ checkoutId: "checkout-1" }),
+      postComment: vi.fn(),
+      wakeupAgent: vi.fn(),
+    };
+    const stateStore = {
+      listAgentStates: vi.fn().mockResolvedValue([
+        {
+          id: "state-1",
+          sessionId: "session-12345678",
+          participantId: "agent-1",
+          status: "absent",
+          anchorSeq: 0,
+          scaffoldIssueId: "issue-1",
+          cliSessionId: null,
+          cliSessionPath: null,
+          idleTurnCount: 0,
+          tokensThisSession: 0,
+        },
+      ]),
+      saveScaffoldIssue: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const manager = new WakeupScaffoldManager(paperclipClient as never, stateStore);
+    await manager.recoverSessionScaffolds(
+      {
+        id: "session-12345678",
+        channelId: "channel-1",
+        status: "active",
+        chunkWindowWTokens: 1200,
+        verbatimKTokens: 800,
+        currentSeq: 1,
+      },
+      {
+        id: "channel-1",
+        type: "project",
+        companyId: "company-1",
+        paperclipRefId: null,
+        name: "Search Ranking",
+      },
+    );
+
+    expect(paperclipClient.checkoutIssue).toHaveBeenCalledWith("issue-1", "agent-1");
   });
 });

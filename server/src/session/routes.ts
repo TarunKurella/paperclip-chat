@@ -8,6 +8,10 @@ export interface SessionRouteAuth {
   requireAny?: RequestHandler;
 }
 
+export interface SessionRouteHooks {
+  onSessionOpened?: (session: Awaited<ReturnType<SessionManager["openSession"]>>) => Promise<void> | void;
+}
+
 export interface AgentRateLimiter {
   consume(agentId: string): boolean;
 }
@@ -20,6 +24,7 @@ export function sessionRoutes(
     "openSession" | "processTurn" | "closeSession" | "getSessionState" | "getTokenUsage" | "listMessages" | "listSessionParticipants"
   >,
   auth: SessionRouteAuth = {},
+  hooks: SessionRouteHooks = {},
   rateLimiter: AgentRateLimiter = new InMemoryAgentRateLimiter(),
 ): ExpressRouter {
   const router = Router();
@@ -41,6 +46,7 @@ export function sessionRoutes(
       ...input,
       participantIds,
     });
+    await hooks.onSessionOpened?.(session);
     res.status(201).json({ session });
   });
 

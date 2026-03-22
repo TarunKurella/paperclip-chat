@@ -137,6 +137,7 @@ export class DbSessionRepository implements SessionRepository, NotificationRepos
         participantIds.map((participantId) => ({
           sessionId,
           participantId,
+          scaffoldIssueId: null,
         })),
       )
       .onConflictDoNothing();
@@ -187,6 +188,18 @@ export class DbSessionRepository implements SessionRepository, NotificationRepos
         and(
           eq(agentChannelStates.sessionId, input.sessionId),
           eq(agentChannelStates.participantId, input.participantId),
+        ),
+      );
+  }
+
+  async saveScaffoldIssue(sessionId: string, participantId: string, scaffoldIssueId: string): Promise<void> {
+    await this.db
+      .update(agentChannelStates)
+      .set({ scaffoldIssueId })
+      .where(
+        and(
+          eq(agentChannelStates.sessionId, sessionId),
+          eq(agentChannelStates.participantId, participantId),
         ),
       );
   }
@@ -264,6 +277,7 @@ function mapAgentStateRow(row: typeof agentChannelStates.$inferSelect): AgentCha
     participantId: row.participantId,
     status: row.status,
     anchorSeq: row.anchorSeq,
+    scaffoldIssueId: row.scaffoldIssueId,
     cliSessionId: row.cliSessionId,
     cliSessionPath: row.cliSessionPath,
     idleTurnCount: row.idleTurnCount,
