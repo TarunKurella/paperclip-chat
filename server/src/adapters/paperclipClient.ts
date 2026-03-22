@@ -81,6 +81,10 @@ export interface PaperclipClientOptions {
   fetchImpl?: typeof fetch;
   logger?: Pick<Console, "warn">;
   retryDelaysMs?: number[];
+  maxRequestsPerMinute?: number;
+  maxWakeupsPerMinute?: number;
+  nowImpl?: () => number;
+  sleepImpl?: (ms: number) => Promise<void>;
 }
 
 export class PaperclipApiError extends Error {
@@ -98,12 +102,21 @@ export class PaperclipClient {
   private readonly fetchImpl: typeof fetch;
   private readonly logger: Pick<Console, "warn">;
   private readonly retryDelaysMs: number[];
+  private readonly maxRequestsPerMinute: number;
+  private readonly maxWakeupsPerMinute: number;
+  private readonly nowImpl: () => number;
+  private readonly sleepImpl: (ms: number) => Promise<void>;
+  private readonly requestTimestamps = new Map<"default" | "wakeup", number[]>();
 
   constructor(private readonly options: PaperclipClientOptions) {
     this.baseUrl = new URL(options.baseUrl);
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.logger = options.logger ?? console;
     this.retryDelaysMs = options.retryDelaysMs ?? [1_000, 2_000, 4_000];
+    this.maxRequestsPerMinute = options.maxRequestsPerMinute ?? 60;
+    this.maxWakeupsPerMinute = options.maxWakeupsPerMinute ?? 10;
+    this.nowImpl = options.nowImpl ?? Date.now;
+    this.sleepImpl = options.sleepImpl ?? sleep;
   }
 
   async listAgents(): Promise<PaperclipAgent[]> {
@@ -178,7 +191,7 @@ export class PaperclipClient {
         method: "POST",
         body: JSON.stringify(wakeup),
         headers: { "Content-Type": "application/json" },
-      }),
+      }, { rateLimitGroup: "wakeup" }),
     );
   }
 
@@ -223,10 +236,11 @@ export class PaperclipClient {
   private async requestJson(
     pathname: string,
     init: RequestInit = {},
-    options: { serviceAuth?: boolean } = {},
+    options: { serviceAuth?: boolean; rateLimitGroup?: "default" | "wakeup" } = {},
   ): Promise<unknown> {
     const url = new URL(pathname, this.baseUrl);
     let lastError: unknown;
+    await this.throttle(options.rateLimitGroup ?? "default");
 
     for (let attempt = 0; attempt <= this.retryDelaysMs.length; attempt += 1) {
       try {
@@ -242,7 +256,7 @@ export class PaperclipClient {
         if (!response.ok) {
           const responseText = await response.text();
           if (response.status >= 500 && attempt < this.retryDelaysMs.length) {
-            await sleep(this.retryDelaysMs[attempt] ?? 0);
+            await this.sleepImpl(this.retryDelaysMs[attempt] ?? 0);
             continue;
           }
 
@@ -257,11 +271,26 @@ export class PaperclipClient {
         }
 
         this.logger.warn(`Paperclip API request retrying after failure: ${error instanceof Error ? error.message : String(error)}`);
-        await sleep(this.retryDelaysMs[attempt] ?? 0);
+        await this.sleepImpl(this.retryDelaysMs[attempt] ?? 0);
       }
     }
 
     throw lastError instanceof Error ? lastError : new Error(String(lastError));
+  }
+
+  private async throttle(group: "default" | "wakeup"): Promise<void> {
+    const limit = group === "wakeup" ? this.maxWakeupsPerMinute : this.maxRequestsPerMinute;
+    const now = this.nowImpl();
+    const recent = (this.requestTimestamps.get(group) ?? []).filter((timestamp) => now - timestamp < 60_000);
+
+    if (recent.length >= limit) {
+      const waitMs = Math.max(0, 60_000 - (now - recent[0]!));
+      await this.sleepImpl(waitMs);
+      return this.throttle(group);
+    }
+
+    recent.push(now);
+    this.requestTimestamps.set(group, recent);
   }
 }
 

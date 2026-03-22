@@ -123,6 +123,55 @@ describe("PaperclipClient", () => {
     expect(companies).toEqual([{ id: "company-1", name: "Acme" }]);
     expect(projects).toEqual([{ id: "project-1", companyId: "company-1", name: "Project One" }]);
   });
+
+  it("delays the 61st non-critical request instead of rejecting it", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () => jsonResponse({ id: "agent-1", name: "Agent" }));
+    let now = 0;
+    const sleeps: number[] = [];
+    const client = new PaperclipClient({
+      baseUrl: "http://localhost:3100",
+      serviceKey: "secret",
+      fetchImpl: fetchMock,
+      retryDelaysMs: [0],
+      maxRequestsPerMinute: 60,
+      nowImpl: () => now,
+      sleepImpl: async (ms) => {
+        sleeps.push(ms);
+        now += ms;
+      },
+    });
+
+    for (let index = 0; index < 61; index += 1) {
+      await client.getAgent("agent-1");
+    }
+
+    expect(fetchMock).toHaveBeenCalledTimes(61);
+    expect(sleeps).toEqual([60_000]);
+  });
+
+  it("uses the tighter wakeup rate limit for wakeup calls", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () => jsonResponse({ status: "ok" }));
+    let now = 0;
+    const sleeps: number[] = [];
+    const client = new PaperclipClient({
+      baseUrl: "http://localhost:3100",
+      serviceKey: "secret",
+      fetchImpl: fetchMock,
+      retryDelaysMs: [0],
+      maxWakeupsPerMinute: 1,
+      nowImpl: () => now,
+      sleepImpl: async (ms) => {
+        sleeps.push(ms);
+        now += ms;
+      },
+    });
+
+    await client.wakeupAgent("agent-1", { source: "automation" });
+    await client.wakeupAgent("agent-1", { source: "automation" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(sleeps).toEqual([60_000]);
+  });
 });
 
 function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
