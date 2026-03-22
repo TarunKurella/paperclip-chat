@@ -1,14 +1,17 @@
 import { randomUUID } from "node:crypto";
-import { CHAT_DEFAULTS, type AgentChannelState, type ChatSession, type Notification, type Turn } from "@paperclip-chat/shared";
+import { CHAT_DEFAULTS, type AgentChannelState, type ChatSession, type Notification, type SessionSummary, type TrunkChunk, type Turn } from "@paperclip-chat/shared";
 import type { NotificationRecord, SessionParticipant, SessionRepository } from "./SessionManager.js";
 import type { TrunkStore } from "../context/TrunkManager.js";
+import type { ContextStore } from "../context/store.js";
 
-export class InMemorySessionRepository implements SessionRepository, TrunkStore {
+export class InMemorySessionRepository implements SessionRepository, TrunkStore, ContextStore {
   private readonly sessions = new Map<string, ChatSession>();
   private readonly sessionParticipants = new Map<string, SessionParticipant[]>();
   private readonly channelParticipants = new Map<string, SessionParticipant[]>();
   private readonly agentStates = new Map<string, AgentChannelState[]>();
   private readonly turns = new Map<string, Turn[]>();
+  private readonly chunks = new Map<string, TrunkChunk[]>();
+  private readonly summaries = new Map<string, SessionSummary>();
   readonly notifications: Notification[] = [];
 
   seedChannelParticipants(channelId: string, participants: SessionParticipant[]): void {
@@ -58,6 +61,15 @@ export class InMemorySessionRepository implements SessionRepository, TrunkStore 
     const turns = this.turns.get(sessionId) ?? [];
     const filtered = cursor === undefined ? turns : turns.filter((turn) => turn.seq > cursor);
     return filtered.slice(0, limit);
+  }
+
+  async listTurnsForRange(sessionId: string, range: { fromSeq: number; toSeq: number; summarizeOnly?: boolean }): Promise<Turn[]> {
+    return (this.turns.get(sessionId) ?? []).filter(
+      (turn) =>
+        turn.seq >= range.fromSeq &&
+        turn.seq <= range.toSeq &&
+        (!range.summarizeOnly || turn.summarize),
+    );
   }
 
   async listChannelParticipants(channelId: string): Promise<SessionParticipant[]> {
@@ -150,6 +162,29 @@ export class InMemorySessionRepository implements SessionRepository, TrunkStore 
           : state,
       ),
     );
+  }
+
+  async listChunks(sessionId: string): Promise<TrunkChunk[]> {
+    return [...(this.chunks.get(sessionId) ?? [])];
+  }
+
+  async createChunk(input: Omit<TrunkChunk, "id">): Promise<TrunkChunk> {
+    const chunk: TrunkChunk = {
+      ...input,
+      id: randomUUID(),
+    };
+    const existing = this.chunks.get(input.sessionId) ?? [];
+    this.chunks.set(input.sessionId, [...existing, chunk]);
+    return chunk;
+  }
+
+  async getSummary(sessionId: string): Promise<SessionSummary | null> {
+    return this.summaries.get(sessionId) ?? null;
+  }
+
+  async upsertSummary(summary: SessionSummary): Promise<SessionSummary> {
+    this.summaries.set(summary.sessionId, summary);
+    return summary;
   }
 
   async create(notification: NotificationRecord): Promise<Notification> {

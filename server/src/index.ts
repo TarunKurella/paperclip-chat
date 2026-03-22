@@ -12,6 +12,10 @@ import { channelRoutes } from "./channels/routes.js";
 import { ChannelService } from "./channels/service.js";
 import { DbChannelRepository } from "./channels/repository.js";
 import { InMemoryChannelRepository } from "./channels/memoryRepository.js";
+import { ChunkWorker } from "./context/ChunkWorker.js";
+import { summarizeChunkWithCli, summarizeFoldWithCli } from "./context/cliSummarizer.js";
+import { SummaryFold } from "./context/SummaryFold.js";
+import { createDrizzleContextStore, createInMemoryContextStore } from "./context/store.js";
 import { createDrizzleTrunkStore, TrunkManager, type TrunkStore } from "./context/TrunkManager.js";
 import { createServerDatabase } from "./db/client.js";
 import { notificationRoutes } from "./notifications/routes.js";
@@ -63,6 +67,7 @@ export async function bootstrapServer(envSource: NodeJS.ProcessEnv = process.env
     sessionRepository = inMemorySessionRepository;
     trunkStore = inMemorySessionRepository;
   }
+  const resolvedContextStore = database ? createDrizzleContextStore(database.db) : createInMemoryContextStore(sessionRepository as InMemorySessionRepository);
   const channelService = new ChannelService(channelRepository, paperclipClient);
   await channelService.seedChannels();
 
@@ -98,6 +103,43 @@ export async function bootstrapServer(envSource: NodeJS.ProcessEnv = process.env
   const hub = new ChatWsHub(paperclipClient, envSource);
   hub.attach(server);
   const wakeupManager = new WakeupScaffoldManager(paperclipClient, sessionRepository);
+  const summaryFold = new SummaryFold(
+    resolvedContextStore,
+    {
+      summarize: (previousSummary, chunkSummary, tokenBudget) =>
+        summarizeFoldWithCli(previousSummary, chunkSummary, tokenBudget, envSource),
+    },
+    hub,
+    paperclipClient.postCost ? {
+      report: async ({ sessionId, stage, inputTokens, outputTokens }) => {
+        await paperclipClient.postCost({
+          billingCode: "chat-context-management",
+          sessionId,
+          stage,
+          inputTokens,
+          outputTokens,
+        });
+      },
+    } : undefined,
+  );
+  const chunkWorker = new ChunkWorker(
+    resolvedContextStore,
+    {
+      summarize: (turns) => summarizeChunkWithCli(turns, envSource),
+    },
+    summaryFold,
+    paperclipClient.postCost ? {
+      report: async ({ sessionId, stage, inputTokens, outputTokens }) => {
+        await paperclipClient.postCost({
+          billingCode: "chat-context-management",
+          sessionId,
+          stage,
+          inputTokens,
+          outputTokens,
+        });
+      },
+    } : undefined,
+  );
   let dispatchCoordinator: AgentDispatchCoordinator | null = null;
   const presence = new PresenceStateMachine({
     flush: (agentId) => {
@@ -128,7 +170,7 @@ export async function bootstrapServer(envSource: NodeJS.ProcessEnv = process.env
     hub,
     sessionRepository,
     debounce,
-    { enqueue: async () => {} },
+    { enqueue: async (sessionId) => { await chunkWorker.enqueue(sessionId); } },
     paperclipClient,
   );
   const idleSessionCoordinator = new IdleSessionCoordinator(
