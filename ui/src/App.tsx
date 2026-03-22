@@ -70,6 +70,15 @@ export function App() {
   const usingFallbackChannels = !companyId || channelsQuery.isError || channels.length === 0;
   const unauthenticatedNotifications = notificationsQuery.isError;
   const draftLength = draft.length;
+  const unreadCountByChannel = notifications.reduce<Record<string, number>>((acc, notification) => {
+    const channelId = typeof notification.payload.channelId === "string" ? notification.payload.channelId : null;
+    if (!channelId) {
+      return acc;
+    }
+
+    acc[channelId] = (acc[channelId] ?? 0) + 1;
+    return acc;
+  }, {});
   const openSessionMutation = useMutation({
     mutationFn: async (channel: Channel) =>
       requestJson<{ session: { id: string } }>(CHAT_API_PATHS.SESSIONS, {
@@ -333,6 +342,8 @@ export function App() {
             <div className="space-y-1 px-3 py-3">
               {channels.map((channel) => {
                 const selected = channel.id === selectedChannel?.id;
+                const unreadCount = unreadCountByChannel[channel.id] ?? 0;
+                const hasSession = Boolean(sessionIdsByChannel[channel.id]);
                 return (
                   <button
                     key={channel.id}
@@ -347,11 +358,27 @@ export function App() {
                       selected ? "bg-stone-100" : "hover:bg-stone-50",
                     )}
                   >
-                    <div className="mt-1 h-2.5 w-2.5 rounded-full bg-blue-500" />
+                    <div className={cn("mt-1 h-2.5 w-2.5 rounded-full", unreadCount > 0 ? "bg-blue-500" : hasSession ? "bg-green-500" : "bg-gray-400")} />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center justify-between gap-3">
-                        <p className="truncate text-sm font-semibold text-stone-900">{channel.name}</p>
-                        <ChevronRight className="h-4 w-4 shrink-0 text-stone-400" />
+                        <div className="flex min-w-0 items-center gap-2">
+                          <p className={cn("truncate text-sm text-stone-900", unreadCount > 0 ? "font-semibold" : "font-medium")}>
+                            {channel.name}
+                          </p>
+                          {hasSession ? (
+                            <span className="rounded-full border border-stone-200 bg-white px-2 py-0.5 text-[11px] font-medium uppercase tracking-[0.14em] text-stone-500">
+                              live
+                            </span>
+                          ) : null}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {unreadCount > 0 ? (
+                            <span className="rounded-full bg-blue-500 px-2 py-0.5 text-[11px] font-semibold text-white">
+                              {unreadCount}
+                            </span>
+                          ) : null}
+                          <ChevronRight className="h-4 w-4 shrink-0 text-stone-400" />
+                        </div>
                       </div>
                       <p className="mt-1 text-xs uppercase tracking-[0.16em] text-stone-500">
                         {channel.type.replace("_", " ")}
