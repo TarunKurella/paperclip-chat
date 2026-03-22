@@ -10,6 +10,7 @@ describe("SessionManager", () => {
     const turn = await fixture.manager.processTurn({
       sessionId: "session-1",
       fromParticipantId: "human-1",
+      fromParticipantType: "human",
       content: "Hey @agent-1 please check auth",
       mentionedIds: ["agent-1"],
     });
@@ -72,6 +73,7 @@ describe("SessionManager", () => {
     await fixture.manager.processTurn({
       sessionId: "session-1",
       fromParticipantId: "human-1",
+      fromParticipantType: "human",
       content: "hello",
       mentionedIds: [],
     });
@@ -95,6 +97,7 @@ describe("SessionManager", () => {
     await fixture.manager.processTurn({
       sessionId: "session-1",
       fromParticipantId: "human-1",
+      fromParticipantType: "human",
       content: "substantial message",
       mentionedIds: [],
     });
@@ -113,6 +116,7 @@ describe("SessionManager", () => {
     await fixture.manager.processTurn({
       sessionId: "session-1",
       fromParticipantId: "human-1",
+      fromParticipantType: "human",
       content: "[DECISION] Ship it",
       mentionedIds: [],
     });
@@ -134,11 +138,47 @@ describe("SessionManager", () => {
     await fixture.manager.processTurn({
       sessionId: "session-1",
       fromParticipantId: "agent-1",
+      fromParticipantType: "agent",
       content: "status update",
       mentionedIds: [],
     });
 
     expect(fixture.repository.incrementIdleTurnCount).toHaveBeenCalledWith("session-1", ["agent-2"]);
+  });
+
+  it("emits agent initiated chat event and notifications on the first agent turn", async () => {
+    const fixture = createFixture({
+      participants: [
+        { participantId: "human-1", participantType: "human", companyId: "company-1" },
+        { participantId: "human-2", participantType: "human", companyId: "company-1" },
+        { participantId: "agent-1", participantType: "agent", companyId: "company-1" },
+      ],
+      turn: {
+        ...makeTurn(),
+        seq: 1,
+        fromParticipantId: "agent-1",
+        content: "taskId:TASK-9 I need help on rollout",
+      },
+    });
+
+    await fixture.manager.processTurn({
+      sessionId: "session-1",
+      fromParticipantId: "agent-1",
+      fromParticipantType: "agent",
+      content: "taskId:TASK-9 I need help on rollout",
+      mentionedIds: [],
+    });
+
+    expect(fixture.hub.broadcast).toHaveBeenCalledWith("channel-1", {
+      type: CHAT_EVENT_TYPES.AGENT_INITIATED_CHAT,
+      payload: {
+        agentId: "agent-1",
+        channelId: "channel-1",
+        messagePreview: "taskId:TASK-9 I need help on rollout",
+        taskId: "TASK-9",
+      },
+    });
+    expect(fixture.notifications.filter((item) => item.type === "agent_initiated")).toHaveLength(2);
   });
 
   it("fails when the session does not exist", async () => {
@@ -148,6 +188,7 @@ describe("SessionManager", () => {
       fixture.manager.processTurn({
         sessionId: "missing",
         fromParticipantId: "human-1",
+        fromParticipantType: "human",
         content: "hello",
         mentionedIds: [],
       }),

@@ -54,6 +54,7 @@ export interface ChunkQueue {
 export interface ProcessTurnInput {
   sessionId: string;
   fromParticipantId: string;
+  fromParticipantType?: "human" | "agent" | "service";
   content: string;
   mentionedIds: string[];
 }
@@ -189,6 +190,7 @@ export class SessionManager {
 
     const participants = await this.repository.listSessionParticipants(input.sessionId);
     await this.notifyOfflineHumans(participants, session, turn, input.fromParticipantId);
+    await this.notifyOnFirstAgentTurn(participants, session, turn, input);
 
     const agentStates = await this.repository.listAgentStates(input.sessionId);
     const mentionedAgents = new Set(input.mentionedIds);
@@ -208,6 +210,59 @@ export class SessionManager {
     }
 
     return turn;
+  }
+
+  private async notifyOnFirstAgentTurn(
+    participants: SessionParticipant[],
+    session: ChatSession,
+    turn: Turn,
+    input: ProcessTurnInput,
+  ): Promise<void> {
+    if (input.fromParticipantType !== "agent" || turn.seq !== 1) {
+      return;
+    }
+
+    const preview = turn.content.length > 160 ? `${turn.content.slice(0, 157)}...` : turn.content;
+    const taskId = readTaskId(turn.content);
+
+    this.hub.broadcast(session.channelId, {
+      type: CHAT_EVENT_TYPES.AGENT_INITIATED_CHAT,
+      payload: {
+        agentId: input.fromParticipantId,
+        channelId: session.channelId,
+        messagePreview: preview,
+        ...(taskId ? { taskId } : {}),
+      },
+    });
+
+    const humanParticipants = participants.filter(
+      (participant) => participant.participantType === "human" && participant.participantId !== input.fromParticipantId,
+    );
+
+    await Promise.all(
+      humanParticipants.map((participant) =>
+        this.notifications
+          .create({
+            userId: participant.participantId,
+            companyId: participant.companyId,
+            type: "agent_initiated",
+            payload: {
+              sessionId: session.id,
+              channelId: session.channelId,
+              turnId: turn.id,
+              agentId: input.fromParticipantId,
+              messagePreview: preview,
+              ...(taskId ? { taskId } : {}),
+            },
+          })
+          .then((notification) => {
+            this.hub.broadcastToUser(participant.participantId, {
+              type: CHAT_EVENT_TYPES.NOTIFICATION_NEW,
+              payload: notification,
+            });
+          }),
+      ),
+    );
   }
 
   private async notifyOfflineHumans(
@@ -279,4 +334,14 @@ export class SessionManager {
       }),
     );
   }
+}
+
+function readTaskId(content: string): string | null {
+  const explicitMatch = content.match(/\btaskId:([A-Za-z0-9_-]+)/i);
+  if (explicitMatch?.[1]) {
+    return explicitMatch[1];
+  }
+
+  const issueMatch = content.match(/\b(?:issue|task)[#:\s]+([A-Za-z0-9_-]+)/i);
+  return issueMatch?.[1] ?? null;
 }

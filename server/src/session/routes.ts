@@ -8,6 +8,10 @@ export interface SessionRouteAuth {
   requireAny?: RequestHandler;
 }
 
+export interface AgentRateLimiter {
+  consume(agentId: string): boolean;
+}
+
 const passThrough: RequestHandler = (_req, _res, next) => next();
 
 export function sessionRoutes(
@@ -16,6 +20,7 @@ export function sessionRoutes(
     "openSession" | "processTurn" | "closeSession" | "getSessionState" | "getTokenUsage" | "listMessages"
   >,
   auth: SessionRouteAuth = {},
+  rateLimiter: AgentRateLimiter = new InMemoryAgentRateLimiter(),
 ): ExpressRouter {
   const router = Router();
 
@@ -32,9 +37,16 @@ export function sessionRoutes(
     async (req, res) => {
       const sessionId = readParam(req.params.id);
       const { text, mentionedIds = [] } = sendMessageSchema.parse(req.body);
+      const principal = (req as AuthenticatedRequest).principal;
+      if (principal?.type === "agent" && !rateLimiter.consume(principal.id)) {
+        res.status(429).json({ error: "Agent send rate limit exceeded (20 messages per minute)" });
+        return;
+      }
+
       const turn = await sessionManager.processTurn({
         sessionId,
         fromParticipantId: getSenderId(req as AuthenticatedRequest),
+        fromParticipantType: principal?.type === "agent" ? "agent" : principal?.type === "human" ? "human" : "service",
         content: text,
         mentionedIds,
       });
@@ -79,6 +91,24 @@ export function sessionRoutes(
   );
 
   return router;
+}
+
+class InMemoryAgentRateLimiter implements AgentRateLimiter {
+  private readonly sendsByAgent = new Map<string, number[]>();
+
+  consume(agentId: string): boolean {
+    const now = Date.now();
+    const windowStart = now - 60_000;
+    const recent = (this.sendsByAgent.get(agentId) ?? []).filter((timestamp) => timestamp > windowStart);
+    if (recent.length >= 20) {
+      this.sendsByAgent.set(agentId, recent);
+      return false;
+    }
+
+    recent.push(now);
+    this.sendsByAgent.set(agentId, recent);
+    return true;
+  }
 }
 
 function getSenderId(req: AuthenticatedRequest): string {

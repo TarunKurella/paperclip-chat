@@ -54,9 +54,36 @@ describe("sessionRoutes", () => {
     expect(sessionManager.processTurn).toHaveBeenCalledWith({
       sessionId: "session-1",
       fromParticipantId: "human-1",
+      fromParticipantType: "human",
       content: "hello there",
       mentionedIds: ["33333333-3333-4333-8333-333333333333"],
     });
+  });
+
+  it("rate limits agent sends after the per-minute limit is exhausted", async () => {
+    const sessionManager = {
+      openSession: vi.fn(),
+      processTurn: vi.fn(),
+      closeSession: vi.fn(),
+      getSessionState: vi.fn(),
+      getTokenUsage: vi.fn(),
+      listMessages: vi.fn(),
+    };
+    const rateLimiter = {
+      consume: vi.fn().mockReturnValue(false),
+    };
+
+    const app = express();
+    app.use(express.json());
+    app.use(injectPrincipal({ type: "agent", id: "agent-1" }));
+    app.use("/api", sessionRoutes(sessionManager as never, {}, rateLimiter));
+
+    const response = await request(app).post("/api/sessions/session-1/send").send({ text: "hello there" });
+
+    expect(response.status).toBe(429);
+    expect(response.body.error).toContain("20 messages per minute");
+    expect(rateLimiter.consume).toHaveBeenCalledWith("agent-1");
+    expect(sessionManager.processTurn).not.toHaveBeenCalled();
   });
 
   it("closes a session", async () => {
@@ -146,9 +173,9 @@ describe("sessionRoutes", () => {
   });
 });
 
-function injectPrincipal() {
+function injectPrincipal(principal: { id: string; type?: "human" | "agent" | "service" } = { id: "human-1", type: "human" }) {
   return (req: express.Request, _res: express.Response, next: express.NextFunction) => {
-    (req as express.Request & { principal?: { id: string } }).principal = { id: "human-1" };
+    (req as express.Request & { principal?: { id: string; type?: "human" | "agent" | "service" } }).principal = principal;
     next();
   };
 }
