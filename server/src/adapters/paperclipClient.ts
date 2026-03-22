@@ -5,6 +5,7 @@ const agentSchema = z.object({
   id: z.string(),
   companyId: z.string().optional(),
   name: z.string(),
+  status: z.string().optional(),
   adapterType: z.string().optional(),
   role: z.string().optional(),
   urlKey: z.string().optional(),

@@ -25,17 +25,27 @@ export class AgentDispatchCoordinator {
   ) {}
 
   async flush(agentId: string, sessionId: string, turns: Turn[]): Promise<void> {
+    debugDispatch("coordinator.flush.start", { agentId, sessionId, turnCount: turns.length });
     const session = await this.sessions.getSession(sessionId);
     if (!session) {
+      debugDispatch("coordinator.flush.missing_session", { agentId, sessionId });
       return;
     }
 
     const channel = await this.channels.getChannel(session.channelId);
     if (!channel) {
+      debugDispatch("coordinator.flush.missing_channel", { agentId, sessionId, channelId: session.channelId });
       return;
     }
 
     const agent = await this.paperclipClient.getAgent(agentId);
+    debugDispatch("coordinator.flush.agent", {
+      agentId,
+      sessionId,
+      adapterType: agent.adapterType ?? null,
+      status: agent.status ?? null,
+      channelType: channel.type,
+    });
     if (agent.adapterType === "http" || agent.adapterType === "process") {
       await this.wakeupManager.flushMentionBatch({ agentId, sessionId, channel, turns });
       return;
@@ -61,6 +71,7 @@ export class AgentDispatchCoordinator {
         : null
     );
     if (!agentState) {
+      debugDispatch("coordinator.flush.missing_agent_state", { agentId, sessionId });
       return;
     }
 
@@ -92,6 +103,7 @@ export class AgentDispatchCoordinator {
 
     const result = await this.subprocessManager.run({
       adapterType: agent.adapterType ?? "claude_local",
+      agentStatus: agent.status ?? null,
       agentId,
       sessionId,
       channel,
@@ -104,8 +116,10 @@ export class AgentDispatchCoordinator {
     });
 
     if (result.status === "queued") {
+      debugDispatch("coordinator.flush.queued", { agentId, sessionId });
       this.queuePending(agentId, sessionId, turns);
     } else {
+      debugDispatch("coordinator.flush.completed", { agentId, sessionId });
       this.pending.delete(agentId);
     }
   }
@@ -132,6 +146,14 @@ export class AgentDispatchCoordinator {
       turns: [...existing.turns, ...turns].sort((left, right) => left.seq - right.seq),
     });
   }
+}
+
+function debugDispatch(event: string, payload: Record<string, unknown>) {
+  if (process.env.CHAT_DEBUG_DISPATCH !== "1") {
+    return;
+  }
+
+  console.log(`[chat-dispatch] ${event}`, payload);
 }
 
 function toBatchedTrigger(turns: Turn[]): Turn {

@@ -31,6 +31,7 @@ describe("AgentDispatchCoordinator", () => {
         agentId: "agent-1",
         sessionId: "session-1",
         cliSessionId: "resume-123",
+        agentStatus: "idle",
         adapterType: "claude_local",
       }),
     );
@@ -78,6 +79,7 @@ describe("AgentDispatchCoordinator", () => {
       expect.objectContaining({
         agentId: "agent-1",
         sessionId: "session-1",
+        agentStatus: "idle",
         adapterType: "claude_local",
       }),
     );
@@ -134,6 +136,7 @@ function createFixture(overrides: {
     getAgent: vi.fn().mockResolvedValue({
       id: "agent-1",
       name: "Agent One",
+      status: "idle",
       adapterType: overrides.adapterType ?? "claude_local",
       bootstrapPrompt: "You are agent one",
     }),

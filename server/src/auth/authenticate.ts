@@ -28,7 +28,7 @@ export async function authenticate(
 ): Promise<unknown> {
   if (hasHumanCredentials(req)) {
     const humanHandled = await attemptHuman(req, res, next, paperclipClient);
-    if (humanHandled) {
+    if (humanHandled !== null) {
       return humanHandled;
     }
   }
@@ -41,7 +41,7 @@ export async function authenticate(
 
   if (bearerToken) {
     const agentHandled = await attemptAgent(req, res, next, paperclipClient, env);
-    if (agentHandled) {
+    if (agentHandled !== null) {
       return agentHandled;
     }
   }

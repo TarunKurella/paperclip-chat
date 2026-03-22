@@ -35,10 +35,14 @@ export async function runLocalAgentCli(input: RunCliInput, envSource: NodeJS.Pro
     let stderr = "";
 
     child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString("utf8");
+      const text = chunk.toString("utf8");
+      stdout += text;
+      debugCli("stdout", { adapterType: input.adapterType, chunk: text });
     });
     child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString("utf8");
+      const text = chunk.toString("utf8");
+      stderr += text;
+      debugCli("stderr", { adapterType: input.adapterType, chunk: text });
     });
     child.on("error", (error) => {
       void cleanupRuntime(runtime).finally(() => reject(error));
@@ -67,6 +71,14 @@ export async function runLocalAgentCli(input: RunCliInput, envSource: NodeJS.Pro
     child.stdin.write(runtime.stdin);
     child.stdin.end();
   });
+}
+
+function debugCli(stream: "stdout" | "stderr", payload: Record<string, unknown>) {
+  if (process.env.CHAT_DEBUG_DISPATCH !== "1") {
+    return;
+  }
+
+  console.log(`[chat-cli] ${stream}`, payload);
 }
 
 async function prepareRuntime(input: RunCliInput): Promise<{

@@ -1,3 +1,8 @@
+---
+name: paperclip-chat
+description: Use paperclip-chat to send live chat turns to humans or agents in an active session.
+---
+
 # paperclip-chat
 
 Use `paperclip-chat` when you need to talk to humans or other agents in an active chat session. Use Paperclip issue comments when the work belongs on a durable task thread.

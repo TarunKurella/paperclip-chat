@@ -3,6 +3,7 @@ import { signChatToken } from "../auth/chatTokens.js";
 import type { WorkspaceResolution } from "./WorkspaceResolver.js";
 import type { PresenceStateMachine } from "./PresenceStateMachine.js";
 import { transitionOnCompletion } from "../context/AgentChannelState.js";
+import { prepareManagedCodexHome, resolveManagedCodexHomeDir } from "./codexHome.js";
 
 export interface SubprocessStreamEvent {
   type: "delta";
@@ -36,6 +37,7 @@ export interface StreamHub {
 
 export interface SpawnRequest {
   adapterType: string;
+  agentStatus?: string | null;
   agentId: string;
   sessionId: string;
   channel: Channel;
@@ -68,7 +70,24 @@ export class SubprocessManager {
   ) {}
 
   async run(request: SpawnRequest): Promise<{ status: "queued" | "completed" }> {
-    if (!this.presence.canSpawn(request.agentId)) {
+    const allowDirectDmSpawn = request.channel.type === "dm";
+    debugDispatch("subprocess.run.start", {
+      agentId: request.agentId,
+      sessionId: request.sessionId,
+      channelType: request.channel.type,
+      presence: this.presence.getPresence(request.agentId),
+      agentStatus: request.agentStatus ?? null,
+    });
+    if (!allowDirectDmSpawn && !this.presence.canSpawn(request.agentId) && !isSpawnablePaperclipStatus(request.agentStatus)) {
+      this.hub.broadcast(request.channelId, {
+        type: "agent.dispatch.queued",
+        payload: {
+          agentId: request.agentId,
+          reason: "presence_blocked",
+          presence: this.presence.getPresence(request.agentId),
+          agentStatus: request.agentStatus ?? null,
+        },
+      });
       return { status: "queued" };
     }
 
@@ -82,6 +101,11 @@ export class SubprocessManager {
 
       try {
         const workspace = await this.resolveWorkspace(request.channel, request.agentId, request.sessionId);
+        debugDispatch("subprocess.run.workspace", {
+          agentId: request.agentId,
+          sessionId: request.sessionId,
+          cwd: workspace.cwd,
+        });
         const token = signChatToken(
           {
             agentId: request.agentId,
@@ -95,13 +119,27 @@ export class SubprocessManager {
           cwd: workspace.cwd,
           args: buildArgs(request.adapterType, request.cliSessionId),
           env: {
-            CHAT_API_URL: this.env.CHAT_API_URL ?? this.env.PAPERCLIP_API_URL ?? "",
+            CHAT_API_URL: resolveChatApiUrl(this.env),
             CHAT_SESSION_ID: request.sessionId,
             CHAT_API_TOKEN: token,
+            PAPERCLIP_API_URL: this.env.PAPERCLIP_API_URL ?? "",
+            PAPERCLIP_AGENT_ID: request.agentId,
+            PAPERCLIP_COMPANY_ID: request.channel.companyId,
+            PAPERCLIP_WORKSPACE_CWD: workspace.cwd,
+            AGENT_HOME: workspace.cwd,
+            CODEX_HOME: request.adapterType === "codex_local"
+              ? await prepareManagedCodexHome(this.env, request.channel.companyId)
+              : resolveManagedCodexHomeDir(this.env, request.channel.companyId),
             PAPERCLIP_WAKE_REASON: "chat_message",
             PAPERCLIP_WAKE_COMMENT_ID: request.triggeringTurn.id,
           },
           stdin: request.prompt,
+        });
+        debugDispatch("subprocess.run.cli_result", {
+          agentId: request.agentId,
+          sessionId: request.sessionId,
+          streamCount: cliResult.stream?.length ?? 0,
+          cliSessionId: cliResult.cliSessionId ?? null,
         });
 
         const fallbackText = (cliResult.stream ?? [])
@@ -116,8 +154,13 @@ export class SubprocessManager {
             (turn) => turn.fromParticipantId === request.agentId && turn.seq > request.triggeringTurn.seq,
           );
           if (!hasAgentReply) {
+            debugDispatch("subprocess.run.fallback_post", {
+              agentId: request.agentId,
+              sessionId: request.sessionId,
+              textLength: fallbackText.length,
+            });
             await postFallbackTurn(
-              this.env.CHAT_API_URL ?? this.env.PAPERCLIP_API_URL ?? "",
+              resolveChatApiUrl(this.env),
               request.sessionId,
               token,
               fallbackText,
@@ -145,6 +188,11 @@ export class SubprocessManager {
           tokensThisSession: (cliResult.actualInputTokens ?? 0) + (cliResult.outputTokens ?? 0),
         });
       } catch (error) {
+        debugDispatch("subprocess.run.error", {
+          agentId: request.agentId,
+          sessionId: request.sessionId,
+          message: error instanceof Error ? error.message : String(error),
+        });
         this.hub.broadcast(request.channelId, {
           type: "agent.error",
           payload: {
@@ -175,6 +223,14 @@ export class SubprocessManager {
   }
 }
 
+function debugDispatch(event: string, payload: Record<string, unknown>) {
+  if (process.env.CHAT_DEBUG_DISPATCH !== "1") {
+    return;
+  }
+
+  console.log(`[chat-dispatch] ${event}`, payload);
+}
+
 async function postFallbackTurn(chatApiUrl: string, sessionId: string, token: string, text: string): Promise<void> {
   if (!chatApiUrl.trim() || !text.trim()) {
     return;
@@ -193,6 +249,21 @@ async function postFallbackTurn(chatApiUrl: string, sessionId: string, token: st
     const body = await response.text().catch(() => "");
     throw new Error(body || `Fallback chat send failed with ${response.status}`);
   }
+}
+
+function isSpawnablePaperclipStatus(status?: string | null): boolean {
+  return status === "idle" || status === "available";
+}
+
+function resolveChatApiUrl(env: NodeJS.ProcessEnv): string {
+  const explicit = env.CHAT_API_URL?.trim();
+  if (explicit) {
+    return explicit;
+  }
+
+  const host = env.CHAT_LISTEN_HOST?.trim() || env.HOST?.trim() || "127.0.0.1";
+  const port = env.PORT?.trim() || "4000";
+  return `http://${host}:${port}`;
 }
 
 function buildArgs(adapterType: string, cliSessionId?: string | null): string[] {

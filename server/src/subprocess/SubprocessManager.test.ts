@@ -1,3 +1,6 @@
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import type { Channel, Turn } from "@paperclip-chat/shared";
 import { describe, expect, it, vi } from "vitest";
 import { PresenceStateMachine } from "./PresenceStateMachine.js";
@@ -19,10 +22,57 @@ describe("SubprocessManager", () => {
       { CHAT_TOKEN_SECRET: "secret", CHAT_API_URL: "http://127.0.0.1:4011" },
     );
 
-    const result = await manager.run(makeRequest());
+    const result = await manager.run(
+      makeRequest({
+        channel: makeChannel({ type: "company_general", name: "General" }),
+      }),
+    );
 
     expect(result.status).toBe("queued");
     expect(runner).not.toHaveBeenCalled();
+  });
+
+  it("allows direct dm spawns even when websocket presence is offline", async () => {
+    const queue = { flush: vi.fn() };
+    const presence = new PresenceStateMachine(queue);
+    const runner = vi.fn().mockResolvedValue({});
+    const manager = new SubprocessManager(
+      presence,
+      vi.fn().mockResolvedValue({ cwd: "/tmp/workspace", sessionPath: "/tmp/session" }),
+      runner,
+      { saveAgentState: vi.fn().mockResolvedValue(undefined), listTurns: vi.fn().mockResolvedValue([]) },
+      { broadcast: vi.fn() },
+      { CHAT_TOKEN_SECRET: "secret", CHAT_API_URL: "http://127.0.0.1:4011" },
+    );
+
+    const result = await manager.run(makeRequest());
+
+    expect(result.status).toBe("completed");
+    expect(runner).toHaveBeenCalled();
+  });
+
+  it("allows spawns when Paperclip reports the agent as idle even without ws presence", async () => {
+    const queue = { flush: vi.fn() };
+    const presence = new PresenceStateMachine(queue);
+    const runner = vi.fn().mockResolvedValue({});
+    const manager = new SubprocessManager(
+      presence,
+      vi.fn().mockResolvedValue({ cwd: "/tmp/workspace", sessionPath: "/tmp/session" }),
+      runner,
+      { saveAgentState: vi.fn().mockResolvedValue(undefined), listTurns: vi.fn().mockResolvedValue([]) },
+      { broadcast: vi.fn() },
+      { CHAT_TOKEN_SECRET: "secret", CHAT_API_URL: "http://127.0.0.1:4011" },
+    );
+
+    const result = await manager.run(
+      makeRequest({
+        channel: makeChannel({ type: "company_general", name: "General" }),
+        agentStatus: "idle",
+      }),
+    );
+
+    expect(result.status).toBe("completed");
+    expect(runner).toHaveBeenCalled();
   });
 
   it("injects chat env vars and resume args for subprocess runs", async () => {
@@ -86,6 +136,85 @@ describe("SubprocessManager", () => {
       payload: { participantId: "agent-1", active: false },
     });
     vi.unstubAllGlobals();
+  });
+
+  it("defaults CHAT_API_URL to the local chat server instead of Paperclip API url", async () => {
+    const queue = { flush: vi.fn() };
+    const presence = new PresenceStateMachine(queue);
+    const runner = vi.fn().mockResolvedValue({});
+    const manager = new SubprocessManager(
+      presence,
+      vi.fn().mockResolvedValue({ cwd: "/tmp/workspace", sessionPath: "/tmp/session" }),
+      runner,
+      { saveAgentState: vi.fn().mockResolvedValue(undefined), listTurns: vi.fn().mockResolvedValue([]) },
+      { broadcast: vi.fn() },
+      {
+        CHAT_TOKEN_SECRET: "secret",
+        PAPERCLIP_API_URL: "http://127.0.0.1:3100",
+        PORT: "4000",
+      },
+    );
+
+    await manager.run(makeRequest({ adapterType: "codex_local" }));
+
+    expect(runner).toHaveBeenCalledWith(
+      expect.objectContaining({
+        env: expect.objectContaining({
+          CHAT_API_URL: "http://127.0.0.1:4000",
+          PAPERCLIP_API_URL: "http://127.0.0.1:3100",
+        }),
+      }),
+    );
+  });
+
+  it("prepares a managed codex home seeded from the shared codex home", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-chat-codex-home-"));
+    const sharedCodexHome = path.join(root, "shared-codex-home");
+    const paperclipHome = path.join(root, "paperclip-home");
+    await fs.mkdir(sharedCodexHome, { recursive: true });
+    await fs.writeFile(path.join(sharedCodexHome, "auth.json"), '{"token":"shared"}\n', "utf8");
+    await fs.writeFile(path.join(sharedCodexHome, "config.toml"), 'model = "codex-mini-latest"\n', "utf8");
+
+    const queue = { flush: vi.fn() };
+    const presence = new PresenceStateMachine(queue);
+    const runner = vi.fn().mockResolvedValue({});
+    const manager = new SubprocessManager(
+      presence,
+      vi.fn().mockResolvedValue({ cwd: "/tmp/workspace", sessionPath: "/tmp/session" }),
+      runner,
+      { saveAgentState: vi.fn().mockResolvedValue(undefined), listTurns: vi.fn().mockResolvedValue([]) },
+      { broadcast: vi.fn() },
+      {
+        CHAT_TOKEN_SECRET: "secret",
+        CHAT_API_URL: "http://127.0.0.1:4011",
+        CODEX_HOME: sharedCodexHome,
+        PAPERCLIP_HOME: paperclipHome,
+      },
+    );
+
+    try {
+      await manager.run(makeRequest({ adapterType: "codex_local" }));
+
+      const runnerEnv = runner.mock.calls[0]?.[0]?.env as Record<string, string>;
+      const managedCodexHome = path.join(
+        paperclipHome,
+        "instances",
+        "default",
+        "companies",
+        "company-1",
+        "codex-home",
+      );
+      expect(runnerEnv.CODEX_HOME).toBe(managedCodexHome);
+      expect((await fs.lstat(path.join(managedCodexHome, "auth.json"))).isSymbolicLink()).toBe(true);
+      expect(await fs.realpath(path.join(managedCodexHome, "auth.json"))).toBe(
+        await fs.realpath(path.join(sharedCodexHome, "auth.json")),
+      );
+      expect(await fs.readFile(path.join(managedCodexHome, "config.toml"), "utf8")).toBe(
+        'model = "codex-mini-latest"\n',
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
   });
 
   it("serializes concurrent spawns per agent", async () => {
@@ -210,6 +339,7 @@ async function waitFor(check: () => boolean): Promise<void> {
 function makeRequest(overrides: Partial<Parameters<SubprocessManager["run"]>[0]> = {}) {
   return {
     adapterType: "claude_local",
+    agentStatus: null,
     agentId: "agent-1",
     sessionId: "session-1",
     channel: makeChannel(),
@@ -237,13 +367,14 @@ function makeAgentState() {
   };
 }
 
-function makeChannel(): Channel {
+function makeChannel(overrides: Partial<Channel> = {}): Channel {
   return {
     id: "channel-1",
     type: "dm",
     companyId: "company-1",
     paperclipRefId: null,
     name: "Direct chat",
+    ...overrides,
   };
 }
 

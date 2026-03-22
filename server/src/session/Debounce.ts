@@ -23,6 +23,7 @@ export class DebounceBuffer<TTurn extends DebouncedTurn> {
   ) {}
 
   enqueue(agentId: string, sessionId: string, turn: TTurn): void {
+    debugDispatch("enqueue", { agentId, sessionId, turnId: turn.id });
     const key = getBufferKey(agentId, sessionId);
     const existing = this.buffers.get(key);
 
@@ -68,10 +69,23 @@ export class DebounceBuffer<TTurn extends DebouncedTurn> {
 
     this.buffers.delete(key);
     clearTimeout(entry.timer);
+    debugDispatch("flush", {
+      agentId: entry.agentId,
+      sessionId: entry.sessionId,
+      turnCount: entry.turns.length,
+    });
     await this.flushHandler(entry.agentId, entry.sessionId, [...entry.turns]);
   }
 }
 
 function getBufferKey(agentId: string, sessionId: string): string {
   return `${agentId}:${sessionId}`;
+}
+
+function debugDispatch(event: string, payload: Record<string, unknown>) {
+  if (process.env.CHAT_DEBUG_DISPATCH !== "1") {
+    return;
+  }
+
+  console.log(`[chat-dispatch] ${event}`, payload);
 }

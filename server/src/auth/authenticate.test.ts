@@ -57,6 +57,46 @@ describe("authenticate", () => {
     });
   });
 
+  it("does not fall through to local dev human auth after a valid agent chat token", async () => {
+    const token = signChatToken(
+      { agentId: "agent-1", sessionId: "session-1", companyId: "company-1" },
+      { CHAT_TOKEN_SECRET: "secret" },
+    );
+    const req: AuthenticatedRequest = {
+      headers: {
+        authorization: `Bearer ${token}`,
+        host: "127.0.0.1:4000",
+      },
+    };
+    const res = createResponse();
+    const next = vi.fn();
+
+    await authenticate(
+      req,
+      res,
+      next,
+      {
+        validateSession: vi.fn(),
+        validateAgentJwt: vi.fn(),
+      },
+      {
+        CHAT_TOKEN_SECRET: "secret",
+        CHAT_SERVICE_KEY: "service-secret",
+        CHAT_LOCAL_DEV_AUTH: "true",
+        CHAT_LOCAL_COMPANY_ID: "company-1",
+        CHAT_LOCAL_USER_ID: "local-user",
+      },
+    );
+
+    expect(next).toHaveBeenCalledOnce();
+    expect(req.principal).toEqual({
+      type: "agent",
+      id: "agent-1",
+      companyId: "company-1",
+      sessionId: "session-1",
+    });
+  });
+
   it("authenticates the service principal from CHAT_SERVICE_KEY", async () => {
     const req: AuthenticatedRequest = {
       headers: { authorization: "Bearer service-secret" },
