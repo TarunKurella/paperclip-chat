@@ -61,6 +61,27 @@ describe("AgentDispatchCoordinator", () => {
     expect(prompt).toContain("[CHUNK 1-2]");
     expect(prompt).toContain("Chunk summary");
   });
+
+  it("dispatches two-party DMs even without persisted agent state rows", async () => {
+    const fixture = createFixture({
+      channel: makeChannel({ type: "dm", name: "tester" }),
+      participants: [
+        { participantId: "human-1", participantType: "human", companyId: "company-1" },
+        { participantId: "agent-1", participantType: "agent", companyId: "company-1" },
+      ],
+      agentStates: [],
+    });
+
+    await fixture.coordinator.flush("agent-1", "session-1", [makeTurn()]);
+
+    expect(fixture.subprocessManager.run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: "agent-1",
+        sessionId: "session-1",
+        adapterType: "claude_local",
+      }),
+    );
+  });
 });
 
 function createFixture(overrides: {
@@ -68,17 +89,21 @@ function createFixture(overrides: {
   agentState?: AgentChannelState;
   channel?: Channel;
   session?: ChatSession;
+  participants?: Array<{ participantId: string; participantType: "human" | "agent"; companyId: string }>;
+  agentStates?: AgentChannelState[];
 } = {}) {
   const session = overrides.session ?? makeSession();
   const channel = overrides.channel ?? makeChannel();
   const agentState = overrides.agentState ?? makeAgentState();
+  const participants = overrides.participants ?? [
+    { participantId: "human-1", participantType: "human" as const, companyId: "company-1" },
+    { participantId: "agent-1", participantType: "agent" as const, companyId: "company-1" },
+  ];
+  const agentStates = overrides.agentStates ?? [agentState];
   const sessions = {
     getSession: vi.fn().mockResolvedValue(session as ChatSession),
-    listSessionParticipants: vi.fn().mockResolvedValue([
-      { participantId: "human-1", participantType: "human", companyId: "company-1" },
-      { participantId: "agent-1", participantType: "agent", companyId: "company-1" },
-    ]),
-    listAgentStates: vi.fn().mockResolvedValue([agentState]),
+    listSessionParticipants: vi.fn().mockResolvedValue(participants),
+    listAgentStates: vi.fn().mockResolvedValue(agentStates),
     listTurns: vi.fn().mockResolvedValue([makeTurn()]),
   };
   const channels = {

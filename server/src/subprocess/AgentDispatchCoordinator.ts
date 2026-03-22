@@ -41,18 +41,33 @@ export class AgentDispatchCoordinator {
       return;
     }
 
+    const participants = await this.sessions.listSessionParticipants(sessionId);
+    const useDmShortcut = shouldUseDmShortcut(channel.type, participants.length);
     const agentStates = await this.sessions.listAgentStates(sessionId);
-    const agentState = agentStates.find((state) => state.participantId === agentId);
+    const agentState = agentStates.find((state) => state.participantId === agentId) ?? (
+      useDmShortcut
+        ? {
+            id: `dm-${sessionId}-${agentId}`,
+            sessionId,
+            participantId: agentId,
+            status: "absent" as const,
+            anchorSeq: 0,
+            scaffoldIssueId: null,
+            cliSessionId: null,
+            cliSessionPath: null,
+            idleTurnCount: 0,
+            tokensThisSession: 0,
+          }
+        : null
+    );
     if (!agentState) {
       return;
     }
 
-    const participants = await this.sessions.listSessionParticipants(sessionId);
     const priorTurns = await this.sessions.listTurns(sessionId, { limit: 200 });
     const globalSummary = await this.context.getSummary(sessionId);
     const triggeringTurn = toBatchedTrigger(turns);
     const senderName = turns.length === 1 ? turns[0]!.fromParticipantId : "Recent messages";
-    const useDmShortcut = shouldUseDmShortcut(channel.type, participants.length);
     const chunks = useDmShortcut || agentState.status === "absent"
       ? []
       : (await this.context.listChunks(sessionId)).filter(
