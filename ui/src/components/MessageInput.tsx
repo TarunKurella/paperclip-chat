@@ -1,3 +1,4 @@
+import { useLayoutEffect, useRef } from "react";
 import { Radio } from "lucide-react";
 import { cn } from "../lib/utils.js";
 
@@ -19,10 +20,21 @@ export function MessageInput(props: {
   onSelectMention(candidate: MentionCandidate): void;
 }) {
   const draftLength = props.draft.length;
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) {
+      return;
+    }
+
+    textarea.style.height = "0px";
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 320)}px`;
+  }, [props.draft]);
 
   return (
     <form
-      className="rounded-md border border-stone-200 bg-stone-50 px-4 py-4"
+      className="rounded-sm border border-stone-200 bg-stone-50 px-4 py-4"
       onSubmit={(event) => {
         event.preventDefault();
         props.onSubmit();
@@ -35,15 +47,27 @@ export function MessageInput(props: {
       <label className="mt-3 block">
         <span className="sr-only">Draft message</span>
         <textarea
+          ref={textareaRef}
           value={props.draft}
           onChange={(event) => props.onDraftChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key !== "Enter" || event.shiftKey) {
+              return;
+            }
+
+            event.preventDefault();
+            if (!props.disabled && !props.pending && props.draft.trim().length > 0) {
+              props.onSubmit();
+            }
+          }}
           placeholder="Write a message. Use @mentions to wake a participant."
           disabled={props.disabled}
-          className="min-h-28 w-full resize-none rounded-md border border-stone-200 bg-white px-4 py-3 text-sm leading-6 text-stone-800 outline-none transition placeholder:text-stone-400 focus:border-stone-400 disabled:cursor-not-allowed disabled:bg-stone-100 disabled:text-stone-500"
+          maxLength={10000}
+          className="min-h-28 w-full resize-none overflow-y-auto rounded-sm border border-stone-200 bg-white px-4 py-3 text-sm leading-6 text-stone-800 outline-none transition placeholder:text-stone-400 focus:border-stone-400 disabled:cursor-not-allowed disabled:bg-stone-100 disabled:text-stone-500"
         />
       </label>
       {props.suggestions.length > 0 ? (
-        <div className="mt-3 rounded-md border border-stone-200 bg-white p-2">
+        <div className="mt-3 rounded-sm border border-stone-200 bg-white p-2">
           <p className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-stone-500">
             Mention suggestions
           </p>
@@ -86,7 +110,7 @@ export function MessageInput(props: {
           <button
             type="submit"
             disabled={props.disabled || props.pending || props.draft.trim().length === 0}
-            className="rounded-md bg-stone-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-stone-700 disabled:cursor-not-allowed disabled:bg-stone-300"
+            className="rounded-sm bg-stone-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-stone-700 disabled:cursor-not-allowed disabled:bg-stone-300"
           >
             {props.pending ? "Sending…" : "Send message"}
           </button>
