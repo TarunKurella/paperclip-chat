@@ -12,6 +12,7 @@ export interface ThreadEntry {
   timestamp: string;
   body: string;
   isDecision: boolean;
+  tokenCount?: number | null;
 }
 
 export interface AgentPresence {
@@ -238,6 +239,11 @@ function ThreadRow(props: { entry: ThreadEntry; streaming?: boolean }) {
           {props.streaming ? (
             <span className="rounded-sm border border-stone-200 bg-stone-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-stone-500">
               streaming
+            </span>
+          ) : null}
+          {entry.tokenCount !== null && entry.tokenCount !== undefined ? (
+            <span className="rounded-sm border border-stone-200 bg-stone-50 px-2 py-0.5 text-[11px] font-medium text-stone-600">
+              {entry.tokenCount} tok
             </span>
           ) : null}
         </div>

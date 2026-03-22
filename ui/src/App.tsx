@@ -645,6 +645,7 @@ function Shell() {
                     timestamp: "now",
                     body: nextDraft,
                     isDecision: false,
+                    tokenCount: null,
                   };
 
                   setOptimisticMessages((current) => ({
@@ -868,6 +869,7 @@ function buildThreadPreview(channel: Channel | null, optimisticEntries: ThreadEn
       timestamp: "just now",
       body: `Opened ${channel.name} and prepared the chat surface for live session traffic.`,
       isDecision: false,
+      tokenCount: null,
     },
     {
       id: `${channel.id}-2`,
@@ -876,6 +878,7 @@ function buildThreadPreview(channel: Channel | null, optimisticEntries: ThreadEn
       timestamp: "live",
       body: "Session routes, token counting, history pagination, and notifications are now wired. Composer send and realtime thread hydration are next.",
       isDecision: false,
+      tokenCount: null,
     },
     ...optimisticEntries,
   ];
@@ -911,6 +914,7 @@ function mapTurnToEntry(turn: Turn): ThreadEntry {
     timestamp: new Date(turn.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
     body: turn.content,
     isDecision: turn.isDecision,
+    tokenCount: turn.tokenCount,
   };
 }
 
