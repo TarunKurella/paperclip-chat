@@ -1,6 +1,7 @@
 import { useEffect, useState, startTransition } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { APP_NAME, CHAT_API_PATHS, type AgentChannelState, type Channel, type ChatSession, type Notification, type Turn } from "@paperclip-chat/shared";
+import { cn } from "./lib/utils.js";
 import {
   BellRing,
   ChevronRight,
@@ -322,10 +323,10 @@ export function App() {
                         setSelectedChannelId(channel.id);
                       })
                     }
-                    className={[
+                    className={cn(
                       "flex w-full items-start gap-3 rounded-2xl px-3 py-3 text-left transition",
                       selected ? "bg-stone-100" : "hover:bg-stone-50",
-                    ].join(" ")}
+                    )}
                   >
                     <div className="mt-1 h-2.5 w-2.5 rounded-full bg-blue-500" />
                     <div className="min-w-0 flex-1">
@@ -378,7 +379,7 @@ export function App() {
                           key={state.id}
                           className="inline-flex items-center gap-2 rounded-full border border-stone-200 bg-white px-3 py-1.5 text-xs font-medium text-stone-700"
                         >
-                          <span className={["h-2 w-2 rounded-full", agentStateToneClass(state.status)].join(" ")} />
+                          <span className={cn("h-2 w-2 rounded-full", agentStateToneClass(state.status))} />
                           {state.participantId.slice(0, 6)} {state.status} · idle {state.idleTurnCount}
                         </span>
                       ))}
@@ -391,7 +392,7 @@ export function App() {
                           key={agentId}
                           className="inline-flex items-center gap-2 rounded-full border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-medium text-stone-700"
                         >
-                          <span className={["h-2 w-2 rounded-full", presenceToneClass(presence.status)].join(" ")} />
+                          <span className={cn("h-2 w-2 rounded-full", presenceToneClass(presence.status))} />
                           {agentId.slice(0, 6)} {presence.status}
                         </span>
                       ))}
@@ -435,18 +436,18 @@ export function App() {
               {previewEntries.map((entry) => (
                 <article
                   key={entry.id}
-                  className={[
+                  className={cn(
                     "rounded-3xl border px-4 py-4",
                     entry.isDecision ? "border-amber-200 bg-amber-50/80" : "border-stone-200 bg-stone-50/70",
-                  ].join(" ")}
+                  )}
                 >
                   <div className="flex items-center justify-between gap-4">
                     <div className="flex items-center gap-3">
                       <div
-                        className={[
+                        className={cn(
                           "h-2.5 w-2.5 rounded-full",
-                          entry.kind === "agent" ? "bg-emerald-500" : "bg-stone-400",
-                        ].join(" ")}
+                          entry.kind === "agent" ? "bg-green-500" : "bg-gray-400",
+                        )}
                       />
                       <p className="text-sm font-semibold text-stone-900">{entry.author}</p>
                       <span className="text-xs uppercase tracking-[0.16em] text-stone-500">{entry.kind}</span>
@@ -620,11 +621,11 @@ export function App() {
 }
 
 function StatusPill(props: { label: string; value: string; tone: "green" | "amber" }) {
-  const toneClass = props.tone === "green" ? "bg-emerald-500" : "bg-amber-500";
+  const toneClass = props.tone === "green" ? "bg-green-500" : "bg-amber-500";
 
   return (
     <div className="flex items-center gap-2 rounded-full border border-stone-200 bg-white px-3 py-1.5">
-      <span className={["h-2 w-2 rounded-full", toneClass].join(" ")} />
+      <span className={cn("h-2 w-2 rounded-full", toneClass)} />
       <span className="text-xs font-semibold uppercase tracking-[0.16em] text-stone-500">{props.label}</span>
       <span className="text-sm font-medium text-stone-700">{props.value}</span>
     </div>
@@ -829,22 +830,22 @@ function presenceToneClass(status: string) {
   switch (status) {
     case "running":
     case "busy":
-      return "bg-emerald-500";
+      return "bg-amber-500 animate-pulse";
     case "idle":
-      return "bg-stone-400";
+      return "bg-green-500";
     default:
-      return "bg-amber-500";
+      return "bg-gray-400";
   }
 }
 
 function agentStateToneClass(status: AgentChannelState["status"]) {
   switch (status) {
     case "active":
-      return "bg-emerald-500";
+      return "bg-green-500";
     case "observing":
-      return "bg-blue-500";
+      return "bg-amber-500";
     default:
-      return "bg-stone-400";
+      return "bg-gray-400";
   }
 }
 
