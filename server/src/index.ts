@@ -12,13 +12,14 @@ import { channelRoutes } from "./channels/routes.js";
 import { ChannelService } from "./channels/service.js";
 import { DbChannelRepository } from "./channels/repository.js";
 import { InMemoryChannelRepository } from "./channels/memoryRepository.js";
-import { TrunkManager } from "./context/TrunkManager.js";
+import { createDrizzleTrunkStore, TrunkManager, type TrunkStore } from "./context/TrunkManager.js";
 import { createServerDatabase } from "./db/client.js";
 import { notificationRoutes } from "./notifications/routes.js";
 import { skillRoutes } from "./skills/routes.js";
 import { DebounceBuffer } from "./session/Debounce.js";
 import { InMemorySessionRepository } from "./session/memoryRepository.js";
-import { SessionManager } from "./session/SessionManager.js";
+import { DbSessionRepository } from "./session/repository.js";
+import { SessionManager, type NotificationRepository, type SessionRepository } from "./session/SessionManager.js";
 import { sessionRoutes } from "./session/routes.js";
 import { WakeupScaffoldManager } from "./wakeup/WakeupScaffoldManager.js";
 import { ChatWsHub } from "./ws/hub.js";
@@ -45,6 +46,17 @@ export async function bootstrapServer(envSource: NodeJS.ProcessEnv = process.env
   }
 
   const channelRepository = database ? new DbChannelRepository(database.db) : new InMemoryChannelRepository();
+  let sessionRepository: SessionRepository & NotificationRepository;
+  let trunkStore: TrunkStore;
+  if (database) {
+    const dbSessionRepository = new DbSessionRepository(database.db);
+    sessionRepository = dbSessionRepository;
+    trunkStore = createDrizzleTrunkStore(database.db);
+  } else {
+    const inMemorySessionRepository = new InMemorySessionRepository();
+    sessionRepository = inMemorySessionRepository;
+    trunkStore = inMemorySessionRepository;
+  }
   const channelService = new ChannelService(channelRepository, paperclipClient);
   await channelService.seedChannels();
 
@@ -78,7 +90,6 @@ export async function bootstrapServer(envSource: NodeJS.ProcessEnv = process.env
   const server = createServer(app);
   const hub = new ChatWsHub(paperclipClient, envSource);
   hub.attach(server);
-  const sessionRepository = new InMemorySessionRepository();
   const wakeupManager = new WakeupScaffoldManager(paperclipClient);
   const debounce = new DebounceBuffer<Turn>(async (agentId, sessionId, turns) => {
     const session = await sessionRepository.getSession(sessionId);
@@ -99,7 +110,7 @@ export async function bootstrapServer(envSource: NodeJS.ProcessEnv = process.env
     });
   });
   const sessionManager = new SessionManager(
-    new TrunkManager(sessionRepository),
+    new TrunkManager(trunkStore),
     sessionRepository,
     hub,
     sessionRepository,
