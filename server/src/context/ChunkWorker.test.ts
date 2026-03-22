@@ -7,7 +7,7 @@ import type { ContextStore } from "./store.js";
 describe("ChunkWorker", () => {
   it("creates a chunk once the token window is crossed", async () => {
     const store = createStore();
-    const fold = { fold: vi.fn().mockResolvedValue(null) } satisfies Pick<SummaryFold, "fold">;
+    const fold = { fold: vi.fn().mockResolvedValue(null), foldTurns: vi.fn().mockResolvedValue(null) } satisfies Pick<SummaryFold, "fold" | "foldTurns">;
     const worker = new ChunkWorker(
       store,
       { summarize: vi.fn().mockResolvedValue("Chunk summary") },
@@ -28,7 +28,7 @@ describe("ChunkWorker", () => {
     const worker = new ChunkWorker(
       store,
       { summarize: vi.fn().mockRejectedValue(new Error("boom")) },
-      { fold: vi.fn() },
+      { fold: vi.fn(), foldTurns: vi.fn() },
     );
 
     const created = await worker.enqueue("session-1");

@@ -13,6 +13,7 @@ import type {
 } from "@paperclip-chat/shared";
 import { and, asc, eq, gt, inArray, isNull } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
+import { incrementIdle } from "../context/AgentChannelState.js";
 import type {
   NotificationRecord,
   NotificationRepository,
@@ -158,12 +159,21 @@ export class DbSessionRepository implements SessionRepository, NotificationRepos
         ),
       );
 
+    const nextStates = incrementIdle(rows.map(mapAgentStateRow), "__none__");
     await Promise.all(
-      rows.map((row) =>
+      nextStates.map((state) =>
         this.db
           .update(agentChannelStates)
-          .set({ idleTurnCount: row.idleTurnCount + 1 })
-          .where(eq(agentChannelStates.id, row.id)),
+          .set({
+            status: state.status,
+            idleTurnCount: state.idleTurnCount,
+          })
+          .where(
+            and(
+              eq(agentChannelStates.sessionId, state.sessionId),
+              eq(agentChannelStates.participantId, state.participantId),
+            ),
+          ),
       ),
     );
   }

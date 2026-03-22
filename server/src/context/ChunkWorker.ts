@@ -16,23 +16,28 @@ export class ChunkWorker {
   constructor(
     private readonly store: ContextStore,
     private readonly model: ChunkSummaryModel,
-    private readonly summaryFold: Pick<SummaryFold, "fold">,
+    private readonly summaryFold: Pick<SummaryFold, "fold" | "foldTurns">,
     private readonly costReporter?: ChunkCostReporter,
   ) {}
 
-  async enqueue(sessionId: string): Promise<boolean> {
+  async enqueue(sessionId: string, mode: "group" | "dm" = "group"): Promise<boolean> {
     const existing = this.locks.get(sessionId);
     if (existing) {
       return existing;
     }
 
-    const task = this.doChunk(sessionId).finally(() => {
+    const task = (mode === "dm" ? this.doFoldDm(sessionId) : this.doChunk(sessionId)).finally(() => {
       if (this.locks.get(sessionId) === task) {
         this.locks.delete(sessionId);
       }
     });
     this.locks.set(sessionId, task);
     return task;
+  }
+
+  private async doFoldDm(sessionId: string): Promise<boolean> {
+    const summary = await this.summaryFold.foldTurns(sessionId);
+    return Boolean(summary);
   }
 
   private async doChunk(sessionId: string): Promise<boolean> {

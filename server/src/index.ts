@@ -171,8 +171,10 @@ export async function bootstrapServer(envSource: NodeJS.ProcessEnv = process.env
     hub,
     sessionRepository,
     debounce,
-    { enqueue: async (sessionId) => { await chunkWorker.enqueue(sessionId); } },
+    { enqueue: async (sessionId, mode) => { await chunkWorker.enqueue(sessionId, mode); } },
     paperclipClient,
+    undefined,
+    channelService,
   );
   const idleSessionCoordinator = new IdleSessionCoordinator(
     sessionManager,

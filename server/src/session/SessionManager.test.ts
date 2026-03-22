@@ -176,7 +176,30 @@ describe("SessionManager", () => {
       mentionedIds: [],
     });
 
-    expect(fixture.chunkQueue.enqueue).toHaveBeenCalledWith("session-1");
+    expect(fixture.chunkQueue.enqueue).toHaveBeenCalledWith("session-1", "group");
+  });
+
+  it("uses DM fold cadence instead of chunking for direct messages", async () => {
+    const fixture = createFixture({
+      channel: { id: "channel-1", type: "dm", companyId: "company-1", paperclipRefId: null, name: "Direct chat" },
+      turn: {
+        ...makeTurn(),
+        seq: CHAT_DEFAULTS.W_DM,
+      },
+      tokensSinceLastChunk: CHAT_DEFAULTS.T_WINDOW,
+    });
+
+    await fixture.manager.processTurn({
+      sessionId: "session-1",
+      fromParticipantId: "human-1",
+      fromParticipantType: "human",
+      content: "direct follow up",
+      mentionedIds: ["agent-1"],
+    });
+
+    expect(fixture.chunkQueue.enqueue).toHaveBeenCalledWith("session-1", "dm");
+    expect(fixture.debounce.enqueue).not.toHaveBeenCalled();
+    expect(fixture.repository.incrementIdleTurnCount).not.toHaveBeenCalled();
   });
 
   it("broadcasts decision events for decision turns", async () => {
@@ -218,6 +241,23 @@ describe("SessionManager", () => {
     });
 
     expect(fixture.repository.incrementIdleTurnCount).toHaveBeenCalledWith("session-1", ["agent-2"]);
+  });
+
+  it("skips agent state creation when opening a DM session", async () => {
+    const fixture = createFixture({
+      channel: { id: "channel-1", type: "dm", companyId: "company-1", paperclipRefId: null, name: "Direct chat" },
+      participants: [
+        { participantId: "human-1", participantType: "human", companyId: "company-1" },
+        { participantId: "agent-1", participantType: "agent", companyId: "company-1" },
+      ],
+    });
+
+    await fixture.manager.openSession({
+      channelId: "channel-1",
+      participantIds: ["human-1", "agent-1"],
+    });
+
+    expect(fixture.repository.createAgentStates).not.toHaveBeenCalled();
   });
 
   it("emits agent initiated chat event and notifications on the first agent turn", async () => {
@@ -281,6 +321,13 @@ function createFixture(overrides: Partial<FixtureOptions> = {}) {
   const agentStates = overrides.agentStates ?? [makeAgentState("agent-1")];
   const connectedUsers = overrides.connectedUsers ?? new Set<string>();
   const notifications: NotificationRecord[] = [];
+  const channel = overrides.channel ?? {
+    id: "channel-1",
+    type: "project" as const,
+    companyId: "company-1",
+    paperclipRefId: "project-1",
+    name: "Project One",
+  };
 
   const trunkManager = {
     insertTurn: vi.fn().mockResolvedValue(turn),
@@ -342,9 +389,12 @@ function createFixture(overrides: Partial<FixtureOptions> = {}) {
   const paraMemoryWriter = {
     write: vi.fn().mockResolvedValue(undefined),
   };
+  const channels = {
+    getChannel: vi.fn().mockResolvedValue(channel),
+  };
 
   return {
-    manager: new SessionManager(trunkManager, repository, hub, notificationsRepo, debounce, chunkQueue, paperclipClient, paraMemoryWriter),
+    manager: new SessionManager(trunkManager, repository, hub, notificationsRepo, debounce, chunkQueue, paperclipClient, paraMemoryWriter, channels),
     trunkManager,
     repository,
     hub,
@@ -405,6 +455,7 @@ interface FixtureOptions {
   session: ChatSession | null;
   turn: Turn;
   turns: Turn[];
+  channel: { id: string; type: "company_general" | "project" | "dm" | "task_thread"; companyId: string; paperclipRefId: string | null; name: string };
   participants: SessionParticipant[];
   agentStates: AgentChannelState[];
   connectedUsers: Set<string>;

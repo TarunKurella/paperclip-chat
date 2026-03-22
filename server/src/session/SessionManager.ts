@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { CHAT_DEFAULTS, CHAT_EVENT_TYPES, type AgentChannelState, type ChatSession, type Notification, type Turn } from "@paperclip-chat/shared";
+import { CHAT_DEFAULTS, CHAT_EVENT_TYPES, type AgentChannelState, type Channel, type ChatSession, type Notification, type Turn } from "@paperclip-chat/shared";
 import type { TrunkManager } from "../context/TrunkManager.js";
 import type { PaperclipClient } from "../adapters/paperclipClient.js";
 import { transitionOnMention } from "../context/AgentChannelState.js";
@@ -62,7 +62,7 @@ export interface AgentWakeupQueue {
 }
 
 export interface ChunkQueue {
-  enqueue(sessionId: string): Promise<void> | void;
+  enqueue(sessionId: string, mode?: "group" | "dm"): Promise<void> | void;
 }
 
 export interface ProcessTurnInput {
@@ -102,6 +102,10 @@ export interface ParaMemoryWriter {
   write(agentIds: string[], sessionId: string, content: string): Promise<void>;
 }
 
+export interface SessionChannelLookup {
+  getChannel(channelId: string): Promise<Channel | null>;
+}
+
 export class SessionNotFoundError extends Error {
   constructor(sessionId: string) {
     super(`Chat session not found: ${sessionId}`);
@@ -119,11 +123,13 @@ export class SessionManager {
     private readonly chunkQueue: ChunkQueue,
     private readonly paperclipClient?: Pick<PaperclipClient, "getAgent" | "createIssue">,
     private readonly paraMemoryWriter: ParaMemoryWriter = new AgentHomeParaMemoryWriter(),
+    private readonly channels?: SessionChannelLookup,
   ) {}
 
   async openSession(input: OpenSessionInput): Promise<ChatSession> {
     const participants = await this.resolveParticipants(input.channelId, input.participantIds);
     const session = await this.repository.createSession(input.channelId, participants);
+    const isDmSession = await this.isDmChannel(input.channelId);
 
     const agentIds = participants
       .filter(
@@ -137,7 +143,7 @@ export class SessionManager {
       await Promise.all(agentIds.map((agentId) => this.paperclipClient!.getAgent(agentId)));
     }
 
-    if (agentIds.length > 0) {
+    if (agentIds.length > 0 && !isDmSession) {
       await this.repository.createAgentStates(session.id, agentIds);
     }
 
@@ -231,6 +237,9 @@ export class SessionManager {
       throw new SessionNotFoundError(input.sessionId);
     }
 
+    const participants = await this.repository.listSessionParticipants(input.sessionId);
+    const isDmSession = await this.isDmChannel(session.channelId);
+
     const turn = await this.trunkManager.insertTurn({
       sessionId: input.sessionId,
       fromParticipantId: input.fromParticipantId,
@@ -238,9 +247,15 @@ export class SessionManager {
       mentionedIds: input.mentionedIds,
     });
 
-    const tokensSinceLastChunk = await this.repository.getTokensSinceLastChunk(input.sessionId);
-    if (tokensSinceLastChunk >= CHAT_DEFAULTS.T_WINDOW) {
-      await this.chunkQueue.enqueue(input.sessionId);
+    if (isDmSession) {
+      if (turn.seq % CHAT_DEFAULTS.W_DM === 0) {
+        await this.chunkQueue.enqueue(input.sessionId, "dm");
+      }
+    } else {
+      const tokensSinceLastChunk = await this.repository.getTokensSinceLastChunk(input.sessionId);
+      if (tokensSinceLastChunk >= CHAT_DEFAULTS.T_WINDOW) {
+        await this.chunkQueue.enqueue(input.sessionId, "group");
+      }
     }
 
     this.hub.broadcast(session.channelId, {
@@ -255,9 +270,12 @@ export class SessionManager {
       });
     }
 
-    const participants = await this.repository.listSessionParticipants(input.sessionId);
     await this.notifyOfflineHumans(participants, session, turn, input.fromParticipantId);
     await this.notifyOnFirstAgentTurn(participants, session, turn, input);
+
+    if (isDmSession) {
+      return turn;
+    }
 
     const agentStates = await this.repository.listAgentStates(input.sessionId);
     const mentionedAgents = new Set(input.mentionedIds);
@@ -281,6 +299,15 @@ export class SessionManager {
     }
 
     return turn;
+  }
+
+  private async isDmChannel(channelId: string): Promise<boolean> {
+    if (!this.channels) {
+      return false;
+    }
+
+    const channel = await this.channels.getChannel(channelId);
+    return channel?.type === "dm";
   }
 
   private async notifyOnFirstAgentTurn(

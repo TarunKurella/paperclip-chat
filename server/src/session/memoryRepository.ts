@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { CHAT_DEFAULTS, type AgentChannelState, type ChatSession, type Notification, type SessionSummary, type TrunkChunk, type Turn } from "@paperclip-chat/shared";
+import { incrementIdle } from "../context/AgentChannelState.js";
 import type { NotificationRecord, SessionParticipant, SessionRepository } from "./SessionManager.js";
 import type { TrunkStore } from "../context/TrunkManager.js";
 import type { ContextStore } from "../context/store.js";
@@ -103,16 +104,14 @@ export class InMemorySessionRepository implements SessionRepository, TrunkStore,
   }
 
   async incrementIdleTurnCount(sessionId: string, participantIds: string[]): Promise<void> {
-    const participantSet = new Set(participantIds);
     const states = this.agentStates.get(sessionId) ?? [];
-    this.agentStates.set(
-      sessionId,
-      states.map((state) =>
-        participantSet.has(state.participantId)
-          ? { ...state, idleTurnCount: state.idleTurnCount + 1 }
-          : state,
-      ),
+    const participantSet = new Set(participantIds);
+    const updated = incrementIdle(
+      states.filter((state) => participantSet.has(state.participantId)),
+      "__none__",
     );
+    const byParticipant = new Map(updated.map((state) => [state.participantId, state]));
+    this.agentStates.set(sessionId, states.map((state) => byParticipant.get(state.participantId) ?? state));
   }
 
   async saveAgentState(state: AgentChannelState): Promise<void> {
