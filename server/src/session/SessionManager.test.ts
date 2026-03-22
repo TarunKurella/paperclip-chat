@@ -47,6 +47,23 @@ describe("SessionManager", () => {
     expect(fixture.paperclipClient.getAgent).toHaveBeenCalledWith("agent-2");
   });
 
+  it("lists session participants", async () => {
+    const fixture = createFixture({
+      participants: [
+        { participantId: "human-1", participantType: "human", companyId: "company-1" },
+        { participantId: "agent-1", participantType: "agent", companyId: "company-1" },
+      ],
+    });
+
+    const participants = await fixture.manager.listSessionParticipants("session-1");
+
+    expect(participants).toEqual([
+      { participantId: "human-1", participantType: "human", companyId: "company-1" },
+      { participantId: "agent-1", participantType: "agent", companyId: "company-1" },
+    ]);
+    expect(fixture.repository.listSessionParticipants).toHaveBeenCalledWith("session-1");
+  });
+
   it("closes a session and emits a session.closed event", async () => {
     const fixture = createFixture();
 

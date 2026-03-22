@@ -23,7 +23,7 @@ export const sendMessageSchema = z.object({
 
 export const openSessionSchema = z.object({
   channelId: uuidSchema,
-  participantIds: z.array(uuidSchema).min(1),
+  participantIds: z.array(uuidSchema).max(32).optional().default([]),
 });
 
 export const closeSessionSchema = z.object({

@@ -137,6 +137,15 @@ export class SessionManager {
     return { session, agentStates };
   }
 
+  async listSessionParticipants(sessionId: string): Promise<SessionParticipant[]> {
+    const session = await this.repository.getSession(sessionId);
+    if (!session) {
+      throw new SessionNotFoundError(sessionId);
+    }
+
+    return this.repository.listSessionParticipants(sessionId);
+  }
+
   async closeSession(input: string | CloseSessionInput): Promise<CloseSessionResult> {
     const sessionId = typeof input === "string" ? input : input.sessionId;
     const crystallize = typeof input === "string" ? false : (input.crystallize ?? false);

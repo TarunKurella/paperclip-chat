@@ -17,7 +17,7 @@ const passThrough: RequestHandler = (_req, _res, next) => next();
 export function sessionRoutes(
   sessionManager: Pick<
     SessionManager,
-    "openSession" | "processTurn" | "closeSession" | "getSessionState" | "getTokenUsage" | "listMessages"
+    "openSession" | "processTurn" | "closeSession" | "getSessionState" | "getTokenUsage" | "listMessages" | "listSessionParticipants"
   >,
   auth: SessionRouteAuth = {},
   rateLimiter: AgentRateLimiter = new InMemoryAgentRateLimiter(),
@@ -26,7 +26,21 @@ export function sessionRoutes(
 
   router.post("/sessions", auth.authenticate ?? passThrough, auth.requireAny ?? passThrough, async (req, res) => {
     const input = openSessionSchema.parse(req.body);
-    const session = await sessionManager.openSession(input);
+    const principal = (req as AuthenticatedRequest).principal;
+    const participantIds = dedupeParticipantIds([
+      ...input.participantIds,
+      ...(principal ? [principal.id] : []),
+    ]);
+
+    if (participantIds.length === 0) {
+      res.status(400).json({ error: "At least one participant is required" });
+      return;
+    }
+
+    const session = await sessionManager.openSession({
+      ...input,
+      participantIds,
+    });
     res.status(201).json({ session });
   });
 
@@ -76,6 +90,12 @@ export function sessionRoutes(
     const sessionId = readParam(req.params.id);
     const turns = await sessionManager.getTokenUsage(sessionId);
     res.json({ turns });
+  });
+
+  router.get("/sessions/:id/participants", auth.authenticate ?? passThrough, auth.requireAny ?? passThrough, async (req, res) => {
+    const sessionId = readParam(req.params.id);
+    const participants = await sessionManager.listSessionParticipants(sessionId);
+    res.json({ participants });
   });
 
   router.get(
@@ -129,4 +149,8 @@ function readParam(value: unknown): string {
   }
 
   throw new Error("Missing route parameter");
+}
+
+function dedupeParticipantIds(participantIds: string[]): string[] {
+  return [...new Set(participantIds)];
 }

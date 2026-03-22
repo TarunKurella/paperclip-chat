@@ -30,6 +30,12 @@ export interface ChannelParticipant {
   joinedAt: string;
 }
 
+export interface SessionParticipant {
+  participantId: string;
+  participantType: ChannelParticipantType;
+  companyId: string;
+}
+
 export interface ChatSession {
   id: string;
   channelId: string;

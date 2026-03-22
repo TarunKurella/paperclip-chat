@@ -12,6 +12,7 @@ describe("sessionRoutes", () => {
       getSessionState: vi.fn(),
       getTokenUsage: vi.fn(),
       listMessages: vi.fn(),
+      listSessionParticipants: vi.fn(),
     };
 
     const app = express();
@@ -21,13 +22,13 @@ describe("sessionRoutes", () => {
 
     const response = await request(app).post("/api/sessions").send({
       channelId: "11111111-1111-4111-8111-111111111111",
-      participantIds: ["22222222-2222-4222-8222-222222222222"],
+      participantIds: [],
     });
 
     expect(response.status).toBe(201);
     expect(sessionManager.openSession).toHaveBeenCalledWith({
       channelId: "11111111-1111-4111-8111-111111111111",
-      participantIds: ["22222222-2222-4222-8222-222222222222"],
+      participantIds: ["human-1"],
     });
   });
 
@@ -39,6 +40,7 @@ describe("sessionRoutes", () => {
       getSessionState: vi.fn(),
       getTokenUsage: vi.fn(),
       listMessages: vi.fn(),
+      listSessionParticipants: vi.fn(),
     };
 
     const app = express();
@@ -68,6 +70,7 @@ describe("sessionRoutes", () => {
       getSessionState: vi.fn(),
       getTokenUsage: vi.fn(),
       listMessages: vi.fn(),
+      listSessionParticipants: vi.fn(),
     };
     const rateLimiter = {
       consume: vi.fn().mockReturnValue(false),
@@ -94,6 +97,7 @@ describe("sessionRoutes", () => {
       getSessionState: vi.fn(),
       getTokenUsage: vi.fn(),
       listMessages: vi.fn(),
+      listSessionParticipants: vi.fn(),
     };
 
     const app = express();
@@ -118,6 +122,7 @@ describe("sessionRoutes", () => {
       getSessionState: vi.fn(),
       getTokenUsage: vi.fn(),
       listMessages: vi.fn(),
+      listSessionParticipants: vi.fn(),
     };
 
     const app = express();
@@ -140,6 +145,7 @@ describe("sessionRoutes", () => {
       getSessionState: vi.fn().mockResolvedValue({ session: { id: "session-1" }, agentStates: [] }),
       getTokenUsage: vi.fn(),
       listMessages: vi.fn(),
+      listSessionParticipants: vi.fn(),
     };
 
     const app = express();
@@ -161,6 +167,7 @@ describe("sessionRoutes", () => {
       getSessionState: vi.fn(),
       getTokenUsage: vi.fn().mockResolvedValue([{ id: "turn-1", tokenCount: 4 }]),
       listMessages: vi.fn(),
+      listSessionParticipants: vi.fn(),
     };
 
     const app = express();
@@ -182,6 +189,7 @@ describe("sessionRoutes", () => {
       getSessionState: vi.fn(),
       getTokenUsage: vi.fn(),
       listMessages: vi.fn().mockResolvedValue([{ id: "turn-2", seq: 2 }]),
+      listSessionParticipants: vi.fn(),
     };
 
     const app = express();
@@ -195,6 +203,35 @@ describe("sessionRoutes", () => {
 
     expect(response.status).toBe(200);
     expect(sessionManager.listMessages).toHaveBeenCalledWith("session-1", 1);
+  });
+
+  it("returns session participants for mention lookup", async () => {
+    const sessionManager = {
+      openSession: vi.fn(),
+      processTurn: vi.fn(),
+      closeSession: vi.fn(),
+      getSessionState: vi.fn(),
+      getTokenUsage: vi.fn(),
+      listMessages: vi.fn(),
+      listSessionParticipants: vi.fn().mockResolvedValue([
+        { participantId: "human-1", participantType: "human", companyId: "company-1" },
+        { participantId: "agent-1", participantType: "agent", companyId: "company-1" },
+      ]),
+    };
+
+    const app = express();
+    app.use(express.json());
+    app.use(injectPrincipal());
+    app.use("/api", sessionRoutes(sessionManager as never));
+
+    const response = await request(app).get("/api/sessions/session-1/participants");
+
+    expect(response.status).toBe(200);
+    expect(response.body.participants).toEqual([
+      { participantId: "human-1", participantType: "human", companyId: "company-1" },
+      { participantId: "agent-1", participantType: "agent", companyId: "company-1" },
+    ]);
+    expect(sessionManager.listSessionParticipants).toHaveBeenCalledWith("session-1");
   });
 });
 
