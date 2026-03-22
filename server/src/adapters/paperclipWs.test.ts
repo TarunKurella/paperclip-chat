@@ -86,6 +86,37 @@ describe("PaperclipWsSubscription", () => {
     });
   });
 
+  it("forwards heartbeat.run.log events to the configured callback", () => {
+    const socket = new FakeSocket();
+    const onRunLog = vi.fn();
+    const client = new PaperclipWsSubscription(
+      {
+        baseUrl: "http://localhost:3100",
+        companyId: "company-1",
+        serviceKey: "secret",
+        onRunLog,
+      },
+      createLogger(),
+      vi.fn(() => socket),
+    );
+
+    client.start();
+    socket.emit(
+      "message",
+      JSON.stringify({
+        type: "heartbeat.run.log",
+        timestamp: "2026-03-21T20:00:00.000Z",
+        payload: { agentId: "agent-1", message: "working..." },
+      }),
+    );
+
+    expect(onRunLog).toHaveBeenCalledWith({
+      agentId: "agent-1",
+      message: "working...",
+      timestamp: "2026-03-21T20:00:00.000Z",
+    });
+  });
+
   it("reconnects with exponential backoff after disconnect", () => {
     const firstSocket = new FakeSocket();
     const secondSocket = new FakeSocket();

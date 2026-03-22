@@ -8,6 +8,12 @@ export interface AgentStatusEvent {
   timestamp: string;
 }
 
+export interface AgentRunLogEvent {
+  agentId: string;
+  message: string;
+  timestamp: string;
+}
+
 export interface PresenceRecord {
   status: string;
   updatedAt: string;
@@ -19,6 +25,7 @@ export interface PaperclipWsConfig {
   serviceKey: string;
   reconnectDelaysMs?: number[];
   onAgentStatus?: (event: AgentStatusEvent) => void;
+  onRunLog?: (event: AgentRunLogEvent) => void;
 }
 
 export interface PaperclipWsLogger {
@@ -104,14 +111,21 @@ export class PaperclipWsSubscription {
       this.logger.info("Paperclip WS connected");
     });
     socket.on("message", (raw) => {
-      const event = parseAgentStatusEvent(raw);
-      if (!event) {
+      const statusEvent = parseAgentStatusEvent(raw);
+      if (statusEvent) {
+        this.presence.update(statusEvent);
+        this.config.onAgentStatus?.(statusEvent);
+        this.logger.info(`Paperclip agent.status ${statusEvent.agentId}=${statusEvent.status}`);
         return;
       }
 
-      this.presence.update(event);
-      this.config.onAgentStatus?.(event);
-      this.logger.info(`Paperclip agent.status ${event.agentId}=${event.status}`);
+      const runLogEvent = parseRunLogEvent(raw);
+      if (!runLogEvent) {
+        return;
+      }
+
+      this.config.onRunLog?.(runLogEvent);
+      this.logger.info(`Paperclip heartbeat.run.log ${runLogEvent.agentId}`);
     });
     socket.on("close", () => {
       this.logger.warn("Paperclip WS disconnected");
@@ -175,6 +189,32 @@ function parseAgentStatusEvent(raw: unknown): AgentStatusEvent | null {
   return {
     agentId: payload.agentId,
     status: payload.status,
+    timestamp: typeof parsed.timestamp === "string" ? parsed.timestamp : new Date().toISOString(),
+  };
+}
+
+function parseRunLogEvent(raw: unknown): AgentRunLogEvent | null {
+  const parsed = parseJson(raw);
+  if (!parsed) {
+    return null;
+  }
+
+  const eventType =
+    typeof parsed.type === "string" ? parsed.type :
+    typeof parsed.event === "string" ? parsed.event :
+    null;
+  if (eventType !== "heartbeat.run.log") {
+    return null;
+  }
+
+  const payload = isRecord(parsed.payload) ? parsed.payload : isRecord(parsed.data) ? parsed.data : null;
+  if (!payload || typeof payload.agentId !== "string" || typeof payload.message !== "string") {
+    return null;
+  }
+
+  return {
+    agentId: payload.agentId,
+    message: payload.message,
     timestamp: typeof parsed.timestamp === "string" ? parsed.timestamp : new Date().toISOString(),
   };
 }

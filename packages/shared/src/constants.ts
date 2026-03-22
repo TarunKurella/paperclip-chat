@@ -22,6 +22,7 @@ export const CHAT_EVENT_TYPES = {
   CHAT_MESSAGE_STREAM: "chat.message.stream",
   AGENT_TYPING: "agent.typing",
   AGENT_STATUS: "agent.status",
+  AGENT_RUN_LOG: "agent.run.log",
   AGENT_INITIATED_CHAT: "agent.initiated_chat",
   SESSION_DECISION: "session.decision",
   SESSION_SUMMARY: "session.summary",

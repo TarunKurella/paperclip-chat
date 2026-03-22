@@ -60,6 +60,12 @@ export async function bootstrapServer(envSource: NodeJS.ProcessEnv = process.env
           payload: event,
         });
       },
+      onRunLog: (event) => {
+        hub.broadcastToCompany(company.id, {
+          type: CHAT_EVENT_TYPES.AGENT_RUN_LOG,
+          payload: event,
+        });
+      },
     });
     subscription.start();
     return subscription;
