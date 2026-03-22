@@ -237,6 +237,10 @@ describe("SessionManager", () => {
 
   it("broadcasts decision events for decision turns", async () => {
     const fixture = createFixture({
+      participants: [
+        { participantId: "human-1", participantType: "human", companyId: "company-1" },
+        { participantId: "human-2", participantType: "human", companyId: "company-1" },
+      ],
       turn: {
         ...makeTurn(),
         isDecision: true,
@@ -255,6 +259,19 @@ describe("SessionManager", () => {
       type: CHAT_EVENT_TYPES.SESSION_DECISION,
       payload: { turn: fixture.turn },
     });
+    expect(fixture.notifications).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining<Partial<NotificationRecord>>({
+          userId: "human-2",
+          type: "decision_pending",
+          payload: {
+            sessionId: "session-1",
+            channelId: "channel-1",
+            turnId: "turn-1",
+          },
+        }),
+      ]),
+    );
   });
 
   it("increments idle turn counts for non-sender agents", async () => {

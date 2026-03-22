@@ -272,6 +272,8 @@ export class SessionManager {
         type: CHAT_EVENT_TYPES.SESSION_DECISION,
         payload: { turn },
       });
+
+      await this.notifyDecisionPendingHumans(participants, session, turn, input.fromParticipantId);
     }
 
     await this.notifyOfflineHumans(participants, session, turn, input.fromParticipantId);
@@ -387,6 +389,42 @@ export class SessionManager {
             userId: participant.participantId,
             companyId: participant.companyId,
             type: "unread_message",
+            payload: {
+              sessionId: session.id,
+              channelId: session.channelId,
+              turnId: turn.id,
+            },
+          })
+          .then((notification) => {
+            this.hub.broadcastToUser(participant.participantId, {
+              type: CHAT_EVENT_TYPES.NOTIFICATION_NEW,
+              payload: notification,
+            });
+          }),
+      ),
+    );
+  }
+
+  private async notifyDecisionPendingHumans(
+    participants: SessionParticipant[],
+    session: ChatSession,
+    turn: Turn,
+    senderId: string,
+  ): Promise<void> {
+    const offlineHumans = participants.filter(
+      (participant) =>
+        participant.participantType === "human" &&
+        participant.participantId !== senderId &&
+        !this.hub.isUserConnected(participant.participantId),
+    );
+
+    await Promise.all(
+      offlineHumans.map((participant) =>
+        this.notifications
+          .create({
+            userId: participant.participantId,
+            companyId: participant.companyId,
+            type: "decision_pending",
             payload: {
               sessionId: session.id,
               channelId: session.channelId,
