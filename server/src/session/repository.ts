@@ -13,7 +13,7 @@ import type {
   SessionSummary,
   Turn,
 } from "@paperclip-chat/shared";
-import { and, asc, eq, gt, inArray, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, lt } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { incrementIdle } from "../context/AgentChannelState.js";
 import type {
@@ -79,21 +79,27 @@ export class DbSessionRepository implements SessionRepository, NotificationRepos
     return rows.reduce((sum, row) => sum + row.tokenCount, 0);
   }
 
-  async listTurns(sessionId: string, options: { cursor?: number; limit?: number } = {}): Promise<Turn[]> {
-    const { cursor, limit = 50 } = options;
+  async listTurns(sessionId: string, options: { cursor?: number; before?: number; limit?: number } = {}): Promise<Turn[]> {
+    const { cursor, before, limit = 50 } = options;
     const conditions = [eq(turns.sessionId, sessionId)];
     if (cursor !== undefined) {
       conditions.push(gt(turns.seq, cursor));
     }
+    if (before !== undefined) {
+      conditions.push(lt(turns.seq, before));
+    }
+
+    const order = before !== undefined || cursor === undefined ? desc(turns.seq) : asc(turns.seq);
 
     const rows = await this.db
       .select()
       .from(turns)
       .where(and(...conditions))
-      .orderBy(asc(turns.seq))
+      .orderBy(order)
       .limit(limit);
 
-    return rows.map(mapTurnRow);
+    const mapped = rows.map(mapTurnRow);
+    return before !== undefined || cursor === undefined ? mapped.reverse() : mapped;
   }
 
   async listChannelParticipants(channelId: string): Promise<SessionParticipant[]> {

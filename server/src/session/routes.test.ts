@@ -202,7 +202,31 @@ describe("sessionRoutes", () => {
       .query({ sessionId: "session-1", cursor: "1" });
 
     expect(response.status).toBe(200);
-    expect(sessionManager.listMessages).toHaveBeenCalledWith("session-1", 1);
+    expect(sessionManager.listMessages).toHaveBeenCalledWith("session-1", { cursor: 1, before: undefined });
+  });
+
+  it("returns older message history with a before cursor", async () => {
+    const sessionManager = {
+      openSession: vi.fn(),
+      processTurn: vi.fn(),
+      closeSession: vi.fn(),
+      getSessionState: vi.fn(),
+      getTokenUsage: vi.fn(),
+      listMessages: vi.fn().mockResolvedValue([{ id: "turn-1", seq: 1 }]),
+      listSessionParticipants: vi.fn(),
+    };
+
+    const app = express();
+    app.use(express.json());
+    app.use(injectPrincipal());
+    app.use("/api", sessionRoutes(sessionManager as never));
+
+    const response = await request(app)
+      .get("/api/channels/channel-1/messages")
+      .query({ sessionId: "session-1", before: "5" });
+
+    expect(response.status).toBe(200);
+    expect(sessionManager.listMessages).toHaveBeenCalledWith("session-1", { cursor: undefined, before: 5 });
   });
 
   it("returns session participants for mention lookup", async () => {

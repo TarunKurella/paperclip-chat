@@ -27,7 +27,7 @@ export interface SessionRepository {
   getSession(sessionId: string): Promise<ChatSession | null>;
   listActiveSessions(): Promise<ChatSession[]>;
   getTokensSinceLastChunk(sessionId: string): Promise<number>;
-  listTurns(sessionId: string, options?: { cursor?: number; limit?: number }): Promise<Turn[]>;
+  listTurns(sessionId: string, options?: { cursor?: number; before?: number; limit?: number }): Promise<Turn[]>;
   listChannelParticipants(channelId: string): Promise<SessionParticipant[]>;
   listSessionParticipants(sessionId: string): Promise<SessionParticipant[]>;
   getSessionSummary(sessionId: string): Promise<SessionSummary | null>;
@@ -214,14 +214,15 @@ export class SessionManager {
     return this.listMessages(sessionId);
   }
 
-  async listMessages(sessionId: string, cursor?: number): Promise<Turn[]> {
+  async listMessages(sessionId: string, options?: { cursor?: number; before?: number }): Promise<Turn[]> {
     const session = await this.repository.getSession(sessionId);
     if (!session) {
       throw new SessionNotFoundError(sessionId);
     }
 
     return this.repository.listTurns(sessionId, {
-      cursor,
+      cursor: options?.cursor,
+      before: options?.before,
       limit: 50,
     });
   }

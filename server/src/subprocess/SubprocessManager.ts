@@ -74,6 +74,10 @@ export class SubprocessManager {
     const prior = this.spawnLocks.get(request.agentId) ?? Promise.resolve();
     const runPromise = prior.then(async () => {
       this.presence.markChatBusy(request.agentId);
+      this.hub.broadcast(request.channelId, {
+        type: CHAT_EVENT_TYPES.AGENT_TYPING,
+        payload: { participantId: request.agentId, active: true },
+      });
 
       try {
         const workspace = await this.resolveWorkspace(request.channel, request.agentId, request.sessionId);
@@ -128,6 +132,10 @@ export class SubprocessManager {
         });
         throw error;
       } finally {
+        this.hub.broadcast(request.channelId, {
+          type: CHAT_EVENT_TYPES.AGENT_TYPING,
+          payload: { participantId: request.agentId, active: false },
+        });
         this.presence.markChatIdle(request.agentId);
       }
     });

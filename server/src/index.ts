@@ -180,7 +180,7 @@ export async function bootstrapServer(envSource: NodeJS.ProcessEnv = process.env
     sessionManager,
     Number(envSource.CHAT_IDLE_TIMEOUT_MS ?? 10 * 60 * 1000),
   );
-  hub.setReplayProvider((sessionId, lastSeq) => sessionManager.listMessages(sessionId, lastSeq));
+  hub.setReplayProvider((sessionId, lastSeq) => sessionManager.listMessages(sessionId, { cursor: lastSeq }));
   const recoveredSessions = await sessionManager.recoverActiveSessions();
   await Promise.all(
     recoveredSessions.map(async ({ session }) => {

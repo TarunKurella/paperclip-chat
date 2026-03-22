@@ -73,8 +73,16 @@ describe("SubprocessManager", () => {
       }),
     );
     expect(hub.broadcast).toHaveBeenCalledWith("channel-1", {
+      type: "agent.typing",
+      payload: { participantId: "agent-1", active: true },
+    });
+    expect(hub.broadcast).toHaveBeenCalledWith("channel-1", {
       type: "chat.message.stream",
       payload: { delta: "hello", done: false, participantId: "agent-1" },
+    });
+    expect(hub.broadcast).toHaveBeenCalledWith("channel-1", {
+      type: "agent.typing",
+      payload: { participantId: "agent-1", active: false },
     });
   });
 

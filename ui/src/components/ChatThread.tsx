@@ -1,6 +1,9 @@
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { AgentChannelState, ChatSession } from "@paperclip-chat/shared";
-import ReactMarkdown from "react-markdown";
 import { cn } from "../lib/utils.js";
+import { SummaryBar } from "./SummaryBar.js";
+
+const MarkdownRenderer = lazy(() => import("./MarkdownRenderer.js").then((module) => ({ default: module.MarkdownRenderer })));
 
 export interface ThreadEntry {
   id: string;
@@ -33,27 +36,73 @@ export function ChatThread(props: {
   typingAgents: string[];
   entries: ThreadEntry[];
   visibleCount: number;
+  hasOlderHistory: boolean;
+  loadingOlder: boolean;
   onShowMore(): void;
   onDismissDecision(): void;
   onCrystallize(): void;
 }) {
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const [isAtBottom, setIsAtBottom] = useState(true);
+  const [newMessageCount, setNewMessageCount] = useState(0);
   const hiddenCount = Math.max(props.entries.length - props.visibleCount, 0);
   const visibleEntries = hiddenCount > 0 ? props.entries.slice(-props.visibleCount) : props.entries;
+  const renderedCount = visibleEntries.length + (props.streamingEntry ? 1 : 0);
+  const previousRenderedCount = useRef(renderedCount);
+
+  useEffect(() => {
+    const container = scrollRef.current;
+    if (!container) {
+      return;
+    }
+
+    if (isAtBottom) {
+      container.scrollTop = container.scrollHeight;
+      setNewMessageCount(0);
+      previousRenderedCount.current = renderedCount;
+      return;
+    }
+
+    if (renderedCount > previousRenderedCount.current) {
+      setNewMessageCount((current) => current + (renderedCount - previousRenderedCount.current));
+    }
+    previousRenderedCount.current = renderedCount;
+  }, [isAtBottom, renderedCount]);
+
+  const showLoadOlder = hiddenCount > 0 || props.hasOlderHistory;
+  const loadOlderLabel = hiddenCount > 0
+    ? `Show ${hiddenCount} earlier message${hiddenCount === 1 ? "" : "s"}`
+    : props.loadingOlder
+      ? "Loading earlier messages…"
+      : "Load older messages";
+
+  const activityEntries = useMemo(() => visibleEntries, [visibleEntries]);
 
   return (
-    <div className="flex-1 space-y-4 overflow-y-auto px-6 py-5">
+    <div
+      ref={scrollRef}
+      className="flex-1 space-y-4 overflow-y-auto px-6 py-5"
+      onScroll={(event) => {
+        const target = event.currentTarget;
+        const nearBottom = target.scrollHeight - target.scrollTop - target.clientHeight < 48;
+        setIsAtBottom(nearBottom);
+        if (nearBottom) {
+          setNewMessageCount(0);
+        }
+      }}
+    >
       {!props.sessionClosed && props.openingSession ? (
-        <article className="rounded-md border border-dashed border-stone-300 bg-stone-50 px-4 py-3 text-sm text-stone-500">
+        <article className="rounded-sm border border-dashed border-stone-300 bg-stone-50 px-4 py-3 text-sm text-stone-500">
           Opening a session for this channel…
         </article>
       ) : null}
       {props.sessionClosed ? (
-        <article className="rounded-md border border-stone-200 bg-stone-100 px-4 py-3 text-sm text-stone-600">
+        <article className="rounded-sm border border-stone-200 bg-stone-100 px-4 py-3 text-sm text-stone-600">
           This session has been closed. You can still review the transcript, but sending is disabled.
         </article>
       ) : null}
       {props.liveDecision ? (
-        <article className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3">
+        <article className="rounded-sm border border-amber-200 bg-amber-50 px-4 py-3">
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-3">
               <span className="h-2.5 w-2.5 rounded-full bg-amber-500" />
@@ -71,45 +120,28 @@ export function ChatThread(props: {
         </article>
       ) : null}
       {props.summaryText ? (
-        <section className="rounded-md border border-stone-200 bg-white px-4 py-4">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-stone-500">Summary</p>
-              <p className="mt-2 whitespace-pre-wrap text-[13px] leading-6 text-stone-700">{props.summaryText}</p>
-            </div>
-            <div className="flex shrink-0 items-center gap-2">
-              {props.summaryTokenCount !== null ? (
-                <span className="rounded-sm border border-stone-200 bg-stone-50 px-2 py-1 text-[11px] font-medium text-stone-600">
-                  {props.summaryTokenCount} tok
-                </span>
-              ) : null}
-              <button
-                type="button"
-                onClick={props.onCrystallize}
-                disabled={props.crystallizing || props.sessionClosed}
-                className="rounded-md border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-medium text-stone-700 transition hover:bg-stone-100 disabled:cursor-not-allowed disabled:text-stone-400"
-              >
-                {props.crystallizing ? "Crystallizing…" : "Crystallize"}
-              </button>
-            </div>
-          </div>
-          {props.crystallizedIssueId ? (
-            <p className="mt-3 text-xs text-stone-500">Created Paperclip issue {props.crystallizedIssueId}.</p>
-          ) : null}
-        </section>
+        <SummaryBar
+          summaryText={props.summaryText}
+          summaryTokenCount={props.summaryTokenCount}
+          crystallizing={props.crystallizing}
+          crystallizedIssueId={props.crystallizedIssueId}
+          disabled={props.sessionClosed}
+          onCrystallize={props.onCrystallize}
+        />
       ) : null}
-      {hiddenCount > 0 ? (
+      {showLoadOlder ? (
         <div className="flex justify-center">
           <button
             type="button"
             onClick={props.onShowMore}
-            className="rounded-md border border-stone-200 bg-white px-4 py-2 text-xs font-medium uppercase tracking-[0.14em] text-stone-600 transition hover:bg-stone-50"
+            disabled={props.loadingOlder}
+            className="rounded-sm border border-stone-200 bg-white px-4 py-2 text-xs font-medium uppercase tracking-[0.14em] text-stone-600 transition hover:bg-stone-50"
           >
-            Show {hiddenCount} earlier message{hiddenCount === 1 ? "" : "s"}
+            {loadOlderLabel}
           </button>
         </div>
       ) : null}
-      {visibleEntries.map((entry) => (
+      {activityEntries.map((entry) => (
         <ThreadRow key={entry.id} entry={entry} />
       ))}
       {props.streamingEntry ? (
@@ -120,8 +152,26 @@ export function ChatThread(props: {
           {props.typingAgents.join(", ")} {props.typingAgents.length === 1 ? "is" : "are"} typing…
         </div>
       ) : null}
+      {!isAtBottom && newMessageCount > 0 ? (
+        <div className="sticky bottom-0 flex justify-center pb-2">
+          <button
+            type="button"
+            onClick={() => {
+              const container = scrollRef.current;
+              if (container) {
+                container.scrollTop = container.scrollHeight;
+              }
+              setNewMessageCount(0);
+              setIsAtBottom(true);
+            }}
+            className="rounded-sm border border-stone-200 bg-white px-4 py-2 text-xs font-medium uppercase tracking-[0.14em] text-stone-700 shadow-sm"
+          >
+            {newMessageCount} new message{newMessageCount === 1 ? "" : "s"}
+          </button>
+        </div>
+      ) : null}
       {props.agentStates.length > 0 || Object.keys(props.presenceByAgent).length > 0 ? (
-        <section className="rounded-md border border-stone-200 bg-white px-4 py-4">
+        <section className="rounded-sm border border-stone-200 bg-white px-4 py-4">
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-stone-500">Realtime activity</p>
           {props.agentStates.length > 0 ? (
             <div className="mt-3 flex flex-wrap gap-2">
@@ -194,7 +244,9 @@ function ThreadRow(props: { entry: ThreadEntry; streaming?: boolean }) {
         <span className="text-xs text-stone-500">{entry.timestamp}</span>
       </div>
       <div className="prose prose-stone mt-3 max-w-none text-[15px] leading-7">
-        <ReactMarkdown>{`${entry.body}${props.streaming ? "▍" : ""}`}</ReactMarkdown>
+        <Suspense fallback={<div className="whitespace-pre-wrap text-[15px] leading-7 text-stone-700">{`${entry.body}${props.streaming ? "▍" : ""}`}</div>}>
+          <MarkdownRenderer body={entry.body} streaming={props.streaming} />
+        </Suspense>
       </div>
     </article>
   );

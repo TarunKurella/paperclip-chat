@@ -115,7 +115,8 @@ export function sessionRoutes(
     async (req, res) => {
       const sessionId = readParam(req.query.sessionId);
       const cursor = req.query.cursor ? Number(readParam(req.query.cursor)) : undefined;
-      const turns = await sessionManager.listMessages(sessionId, cursor);
+      const before = req.query.before ? Number(readParam(req.query.before)) : undefined;
+      const turns = await sessionManager.listMessages(sessionId, { cursor, before });
       res.json({ turns });
     },
   );

@@ -5,18 +5,10 @@ import { cn } from "./lib/utils.js";
 import { Routes, Route, Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 import { ChatThread, type AgentPresence, type ThreadEntry } from "./components/ChatThread.js";
 import { MessageInput, type MentionCandidate } from "./components/MessageInput.js";
+import { NotificationPanel } from "./components/NotificationPanel.js";
 import { Sidebar } from "./components/Sidebar.js";
 import { StatusPill } from "./components/StatusPill.js";
-import {
-  BellRing,
-  PanelLeft,
-  PanelRight,
-  Lock,
-  MessageSquareText,
-  Sparkles,
-  TriangleAlert,
-  X,
-} from "lucide-react";
+import { PanelLeft, PanelRight, Lock, MessageSquareText, Sparkles, X } from "lucide-react";
 
 export function App() {
   return (
@@ -47,6 +39,7 @@ function Shell() {
   const [newDmName, setNewDmName] = useState("");
   const [visibleEntryCount, setVisibleEntryCount] = useState(20);
   const [crystallizedIssueId, setCrystallizedIssueId] = useState<string | null>(null);
+  const [hasOlderHistory, setHasOlderHistory] = useState(false);
   const healthQuery = useQuery({
     queryKey: ["health"],
     queryFn: async () => requestJson<{ status: string; paperclip: string; ws: string }>("/api/health"),
@@ -198,6 +191,22 @@ function Shell() {
         `${CHAT_API_PATHS.CHANNEL_MESSAGES(selectedChannel!.id)}?sessionId=${encodeURIComponent(selectedSessionId!)}`,
       ),
   });
+  const loadOlderMessagesMutation = useMutation({
+    mutationFn: async (input: { channelId: string; sessionId: string; before: number }) =>
+      requestJson<{ turns: Turn[] }>(
+        `${CHAT_API_PATHS.CHANNEL_MESSAGES(input.channelId)}?sessionId=${encodeURIComponent(input.sessionId)}&before=${encodeURIComponent(String(input.before))}`,
+      ),
+    onSuccess: (result, variables) => {
+      queryClient.setQueryData<{ turns: Turn[] }>(
+        ["messages", variables.channelId, variables.sessionId],
+        (current) => ({
+          turns: dedupeTurns([...(result.turns ?? []), ...(current?.turns ?? [])]),
+        }),
+      );
+      setHasOlderHistory(result.turns.length >= 50);
+      setVisibleEntryCount((current) => current + result.turns.length);
+    },
+  });
   const tokenUsageQuery = useQuery({
     queryKey: ["tokens", selectedSessionId],
     enabled: Boolean(selectedSessionId),
@@ -225,6 +234,10 @@ function Shell() {
     setStreamingEntry(null);
     setTypingAgents([]);
   }, [location.pathname, location.search]);
+
+  useEffect(() => {
+    setHasOlderHistory(false);
+  }, [selectedSessionId]);
 
   const liveEntries = (messagesQuery.data?.turns ?? []).map(mapTurnToEntry);
   const sessionState = sessionStateQuery.data?.session ?? null;
@@ -260,6 +273,12 @@ function Shell() {
     setStreamingEntry(null);
     setTypingAgents([]);
   }, [selectedChannelId, selectedSessionId]);
+
+  useEffect(() => {
+    if ((messagesQuery.data?.turns?.length ?? 0) >= 50) {
+      setHasOlderHistory(true);
+    }
+  }, [messagesQuery.data?.turns?.length]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -626,7 +645,25 @@ function Shell() {
               typingAgents={typingAgents}
               entries={previewEntries}
               visibleCount={visibleEntryCount}
-              onShowMore={() => setVisibleEntryCount((current) => current + 20)}
+              hasOlderHistory={hasOlderHistory}
+              loadingOlder={loadOlderMessagesMutation.isPending}
+              onShowMore={() => {
+                if (visibleEntryCount < previewEntries.length) {
+                  setVisibleEntryCount((current) => current + 20);
+                  return;
+                }
+
+                const earliestSeq = messagesQuery.data?.turns?.[0]?.seq;
+                if (!selectedChannel || !selectedSessionId || earliestSeq === undefined || loadOlderMessagesMutation.isPending || !hasOlderHistory) {
+                  return;
+                }
+
+                loadOlderMessagesMutation.mutate({
+                  channelId: selectedChannel.id,
+                  sessionId: selectedSessionId,
+                  before: earliestSeq,
+                });
+              }}
               onDismissDecision={() => setLiveDecision(null)}
               onCrystallize={() => {
                 if (!selectedSessionId) {
@@ -691,123 +728,17 @@ function Shell() {
             </div>
           </section>
 
-          <aside className="hidden rounded-lg border border-stone-200 bg-white shadow-sm lg:block">
-            <div className="border-b border-stone-200 px-5 py-4">
-              <div className="flex items-center gap-3">
-                <div className="rounded-md bg-amber-50 p-2 text-amber-600">
-                  <BellRing className="h-4 w-4" />
-                </div>
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">
-                    Notifications
-                  </p>
-                  <h2 className="text-lg font-semibold">Unread Queue</h2>
-                </div>
-              </div>
-              {selectedSessionId ? (
-                <div className="mt-3 flex flex-wrap gap-2 text-xs font-medium text-stone-600">
-                  <span className="rounded-sm border border-stone-200 bg-stone-50 px-3 py-1.5">
-                    total {totalTokenCount} tok
-                  </span>
-                  <span className="rounded-sm border border-stone-200 bg-stone-50 px-3 py-1.5">
-                    turns {tokenTurns.length}
-                  </span>
-                </div>
-              ) : null}
-              {unauthenticatedNotifications ? (
-                <div className="mt-3 flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800">
-                  <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
-                  <p>Showing preview notifications until a Paperclip-authenticated browser session is present.</p>
-                </div>
-              ) : null}
-            </div>
-            <div className="space-y-3 px-4 py-4">
-              {selectedSessionId ? (
-                <section className="rounded-md border border-stone-200 bg-stone-50 px-4 py-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold text-stone-900">Session telemetry</p>
-                      <p className="mt-1 text-xs uppercase tracking-[0.16em] text-stone-500">token usage</p>
-                    </div>
-                    <span className="text-xs text-stone-500">{totalTokenCount} tok</span>
-                  </div>
-                  <div className="mt-3 space-y-2">
-                    {tokenTurns.slice(-5).reverse().map((turn) => (
-                      <div
-                        key={turn.id}
-                        className="flex items-center justify-between gap-3 rounded-sm border border-stone-200 bg-white px-3 py-2"
-                      >
-                        <div className="min-w-0">
-                          <p className="truncate text-xs font-medium text-stone-900">
-                            {turn.fromParticipantId.slice(0, 8)} · seq {turn.seq}
-                          </p>
-                          <p className="truncate text-xs text-stone-500">
-                            {new Date(turn.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                          </p>
-                        </div>
-                        <span className="shrink-0 text-xs font-medium text-stone-700">{turn.tokenCount} tok</span>
-                      </div>
-                    ))}
-                    {tokenTurns.length === 0 ? (
-                      <p className="text-sm text-stone-500">No tokenized turns yet.</p>
-                    ) : null}
-                  </div>
-                </section>
-              ) : null}
-              {!unauthenticatedNotifications && notifications.length > 0 ? (
-                <div className="flex justify-end">
-                  <button
-                    type="button"
-                    onClick={() => markNotificationsReadMutation.mutate(notifications.map((notification) => notification.id))}
-                    disabled={markNotificationsReadMutation.isPending}
-                    className="rounded-md border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-medium text-stone-700 transition hover:bg-stone-100 disabled:cursor-not-allowed disabled:text-stone-400"
-                  >
-                    {markNotificationsReadMutation.isPending ? "Clearing…" : "Mark all read"}
-                  </button>
-                </div>
-              ) : null}
-              {notifications.map((notification) => (
-                <article key={notification.id} className="rounded-md border border-stone-200 bg-stone-50 px-4 py-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold text-stone-900">{renderNotificationTitle(notification)}</p>
-                      <p className="mt-1 text-xs uppercase tracking-[0.16em] text-stone-500">
-                        {notification.type.replace("_", " ")}
-                      </p>
-                    </div>
-                    <div className="h-2.5 w-2.5 rounded-full bg-blue-500" />
-                  </div>
-                  <p className="mt-3 text-sm leading-6 text-stone-600">
-                    {renderNotificationBody(notification)}
-                  </p>
-                  {!unauthenticatedNotifications ? (
-                    <div className="mt-3 flex justify-between gap-3">
-                      {typeof notification.payload.channelId === "string" ? (
-                        <button
-                          type="button"
-                          onClick={() => navigate(`/channels/${notification.payload.channelId}${location.search}`)}
-                          className={cn(
-                            "rounded-md border px-3 py-1.5 text-xs font-medium transition",
-                            notificationsRoute ? "border-amber-200 bg-amber-50 text-amber-700" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-100",
-                          )}
-                        >
-                          Open channel
-                        </button>
-                      ) : <span />}
-                      <button
-                        type="button"
-                        onClick={() => markNotificationsReadMutation.mutate([notification.id])}
-                        disabled={markNotificationsReadMutation.isPending}
-                        className="rounded-md border border-stone-200 bg-white px-3 py-1.5 text-xs font-medium text-stone-700 transition hover:bg-stone-100 disabled:cursor-not-allowed disabled:text-stone-400"
-                      >
-                        Mark read
-                      </button>
-                    </div>
-                  ) : null}
-                </article>
-              ))}
-            </div>
-          </aside>
+          <NotificationPanel
+            notifications={notifications}
+            selectedSessionId={selectedSessionId}
+            totalTokenCount={totalTokenCount}
+            tokenTurns={tokenTurns}
+            unauthenticated={unauthenticatedNotifications}
+            notificationsRoute={notificationsRoute}
+            pending={markNotificationsReadMutation.isPending}
+            onOpenChannel={(channelId) => navigate(`/channels/${channelId}${location.search}`)}
+            onMarkRead={(notificationIds) => markNotificationsReadMutation.mutate(notificationIds)}
+          />
         </div>
       </div>
       {mobileSidebarOpen ? (
@@ -858,41 +789,20 @@ function Shell() {
                 Close
               </button>
             </div>
-            <aside className="flex-1 overflow-y-auto rounded-lg border border-stone-200 bg-white shadow-sm">
-              <div className="border-b border-stone-200 px-5 py-4">
-                <div className="flex items-center gap-3">
-                  <div className="rounded-md bg-amber-50 p-2 text-amber-600">
-                    <BellRing className="h-4 w-4" />
-                  </div>
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">
-                      Notifications
-                    </p>
-                    <h2 className="text-lg font-semibold">Unread Queue</h2>
-                  </div>
-                </div>
-              </div>
-              <div className="space-y-3 px-4 py-4">
-                {notifications.slice(0, 6).map((notification) => (
-                  <article key={`mobile-${notification.id}`} className="rounded-md border border-stone-200 bg-stone-50 px-4 py-4">
-                    <p className="text-sm font-semibold text-stone-900">{renderNotificationTitle(notification)}</p>
-                    <p className="mt-2 text-sm leading-6 text-stone-600">{renderNotificationBody(notification)}</p>
-                    {typeof notification.payload.channelId === "string" ? (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setMobileActivityOpen(false);
-                          navigate(`/channels/${notification.payload.channelId}${location.search}`);
-                        }}
-                        className="mt-3 rounded-md border border-stone-200 bg-white px-3 py-1.5 text-xs font-medium text-stone-700"
-                      >
-                        Open channel
-                      </button>
-                    ) : null}
-                  </article>
-                ))}
-              </div>
-            </aside>
+            <NotificationPanel
+              compact
+              notifications={notifications}
+              selectedSessionId={selectedSessionId}
+              totalTokenCount={totalTokenCount}
+              tokenTurns={tokenTurns}
+              unauthenticated={unauthenticatedNotifications}
+              pending={markNotificationsReadMutation.isPending}
+              onOpenChannel={(channelId) => {
+                setMobileActivityOpen(false);
+                navigate(`/channels/${channelId}${location.search}`);
+              }}
+              onMarkRead={(notificationIds) => markNotificationsReadMutation.mutate(notificationIds)}
+            />
           </div>
         </div>
       ) : null}
@@ -1017,26 +927,6 @@ function dedupeNotifications(notifications: Notification[]) {
     seen.add(notification.id);
     return true;
   });
-}
-
-function renderNotificationTitle(notification: Notification) {
-  switch (notification.type) {
-    case "agent_initiated":
-      return "Agent initiated a new thread";
-    case "decision_pending":
-      return "Decision ready for review";
-    default:
-      return "Unread conversation update";
-  }
-}
-
-function renderNotificationBody(notification: Notification) {
-  const payload = notification.payload as Record<string, string | undefined>;
-  if (payload.turnId) {
-    return `Turn ${payload.turnId} is waiting in channel ${payload.channelId ?? "unknown"}.`;
-  }
-
-  return "A new update is waiting in the chat queue.";
 }
 
 function mapTurnToEntry(turn: Turn): ThreadEntry {
