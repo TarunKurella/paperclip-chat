@@ -24,6 +24,7 @@ export interface SessionRepository {
   createSession(channelId: string, participants: SessionParticipant[]): Promise<ChatSession>;
   closeSession(sessionId: string): Promise<ChatSession | null>;
   getSession(sessionId: string): Promise<ChatSession | null>;
+  listActiveSessions(): Promise<ChatSession[]>;
   getTokensSinceLastChunk(sessionId: string): Promise<number>;
   listTurns(sessionId: string, options?: { cursor?: number; limit?: number }): Promise<Turn[]>;
   listChannelParticipants(channelId: string): Promise<SessionParticipant[]>;
@@ -31,6 +32,14 @@ export interface SessionRepository {
   listAgentStates(sessionId: string): Promise<AgentChannelState[]>;
   createAgentStates(sessionId: string, participantIds: string[]): Promise<void>;
   incrementIdleTurnCount(sessionId: string, participantIds: string[]): Promise<void>;
+  saveRunState(input: {
+    sessionId: string;
+    participantId: string;
+    cliSessionId: string | null;
+    cliSessionPath: string | null;
+    anchorSeq: number;
+    tokensThisSession: number;
+  }): Promise<void>;
 }
 
 export interface NotificationRepository {
@@ -72,6 +81,11 @@ export interface CloseSessionInput {
 }
 
 export interface SessionDetails {
+  session: ChatSession;
+  agentStates: AgentChannelState[];
+}
+
+export interface RecoveredSessionState {
   session: ChatSession;
   agentStates: AgentChannelState[];
 }
@@ -144,6 +158,18 @@ export class SessionManager {
     }
 
     return this.repository.listSessionParticipants(sessionId);
+  }
+
+  async recoverActiveSessions(): Promise<RecoveredSessionState[]> {
+    const sessions = await this.repository.listActiveSessions();
+    const recovered = await Promise.all(
+      sessions.map(async (session) => ({
+        session,
+        agentStates: await this.repository.listAgentStates(session.id),
+      })),
+    );
+
+    return recovered;
   }
 
   async closeSession(input: string | CloseSessionInput): Promise<CloseSessionResult> {

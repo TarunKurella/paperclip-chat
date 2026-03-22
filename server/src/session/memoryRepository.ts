@@ -45,6 +45,10 @@ export class InMemorySessionRepository implements SessionRepository, TrunkStore 
     return this.sessions.get(sessionId) ?? null;
   }
 
+  async listActiveSessions(): Promise<ChatSession[]> {
+    return [...this.sessions.values()].filter((session) => session.status === "active");
+  }
+
   async getTokensSinceLastChunk(sessionId: string): Promise<number> {
     return (this.turns.get(sessionId) ?? []).reduce((total, turn) => total + turn.tokenCount, 0);
   }
@@ -93,6 +97,31 @@ export class InMemorySessionRepository implements SessionRepository, TrunkStore 
       states.map((state) =>
         participantSet.has(state.participantId)
           ? { ...state, idleTurnCount: state.idleTurnCount + 1 }
+          : state,
+      ),
+    );
+  }
+
+  async saveRunState(input: {
+    sessionId: string;
+    participantId: string;
+    cliSessionId: string | null;
+    cliSessionPath: string | null;
+    anchorSeq: number;
+    tokensThisSession: number;
+  }): Promise<void> {
+    const states = this.agentStates.get(input.sessionId) ?? [];
+    this.agentStates.set(
+      input.sessionId,
+      states.map((state) =>
+        state.participantId === input.participantId
+          ? {
+              ...state,
+              cliSessionId: input.cliSessionId,
+              cliSessionPath: input.cliSessionPath,
+              anchorSeq: input.anchorSeq,
+              tokensThisSession: input.tokensThisSession,
+            }
           : state,
       ),
     );

@@ -108,6 +108,7 @@ export async function bootstrapServer(envSource: NodeJS.ProcessEnv = process.env
     paperclipClient,
   );
   hub.setReplayProvider((sessionId, lastSeq) => sessionManager.listMessages(sessionId, lastSeq));
+  await sessionManager.recoverActiveSessions();
 
   app.get("/api/health", (_req, res) => {
     res.json({ status: "ok", paperclip: "connected", ws: "running" });

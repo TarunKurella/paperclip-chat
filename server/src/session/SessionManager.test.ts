@@ -64,6 +64,27 @@ describe("SessionManager", () => {
     expect(fixture.repository.listSessionParticipants).toHaveBeenCalledWith("session-1");
   });
 
+  it("recovers active sessions with their agent state", async () => {
+    const fixture = createFixture({
+      sessions: [
+        makeSession(),
+        {
+          ...makeSession(),
+          id: "session-2",
+          channelId: "channel-2",
+        },
+      ],
+    });
+
+    const recovered = await fixture.manager.recoverActiveSessions();
+
+    expect(recovered).toEqual([
+      { session: fixture.sessions[0], agentStates: fixture.agentStates },
+      { session: fixture.sessions[1], agentStates: fixture.agentStates },
+    ]);
+    expect(fixture.repository.listActiveSessions).toHaveBeenCalledOnce();
+  });
+
   it("closes a session and emits a session.closed event", async () => {
     const fixture = createFixture();
 
@@ -268,6 +289,7 @@ function createFixture(overrides: Partial<FixtureOptions> = {}) {
     createSession: vi.fn().mockResolvedValue(session ?? makeSession()),
     closeSession: vi.fn().mockResolvedValue(session),
     getSession: vi.fn().mockResolvedValue(session),
+    listActiveSessions: vi.fn().mockResolvedValue(overrides.sessions ?? (session ? [session] : [])),
     getTokensSinceLastChunk: vi.fn().mockResolvedValue(overrides.tokensSinceLastChunk ?? 0),
     listTurns: vi.fn().mockResolvedValue(turns),
     listChannelParticipants: vi.fn().mockResolvedValue(participants),
@@ -275,6 +297,7 @@ function createFixture(overrides: Partial<FixtureOptions> = {}) {
     listAgentStates: vi.fn().mockResolvedValue(agentStates),
     createAgentStates: vi.fn().mockResolvedValue(undefined),
     incrementIdleTurnCount: vi.fn().mockResolvedValue(undefined),
+    saveRunState: vi.fn().mockResolvedValue(undefined),
   };
   const hub = {
     broadcast: vi.fn(),
@@ -330,6 +353,8 @@ function createFixture(overrides: Partial<FixtureOptions> = {}) {
     turns,
     paperclipClient,
     paraMemoryWriter,
+    sessions: overrides.sessions ?? (session ? [session] : []),
+    agentStates,
   };
 }
 
@@ -381,4 +406,5 @@ interface FixtureOptions {
   agentStates: AgentChannelState[];
   connectedUsers: Set<string>;
   tokensSinceLastChunk: number;
+  sessions: ChatSession[];
 }
