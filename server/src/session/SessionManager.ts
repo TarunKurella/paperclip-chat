@@ -19,6 +19,8 @@ export interface SessionParticipant {
   participantId: string;
   participantType: "human" | "agent";
   companyId: string;
+  displayName?: string | null;
+  mentionLabel?: string | null;
 }
 
 export interface SessionRepository {
@@ -30,6 +32,7 @@ export interface SessionRepository {
   listTurns(sessionId: string, options?: { cursor?: number; before?: number; limit?: number }): Promise<Turn[]>;
   listChannelParticipants(channelId: string): Promise<SessionParticipant[]>;
   listSessionParticipants(sessionId: string): Promise<SessionParticipant[]>;
+  syncChannelParticipants(channelId: string, participants: SessionParticipant[]): Promise<void>;
   getSessionSummary(sessionId: string): Promise<SessionSummary | null>;
   listAgentStates(sessionId: string): Promise<AgentChannelState[]>;
   createAgentStates(sessionId: string, participantIds: string[]): Promise<void>;
@@ -123,22 +126,19 @@ export class SessionManager {
     private readonly notifications: NotificationRepository,
     private readonly debounce: AgentWakeupQueue,
     private readonly chunkQueue: ChunkQueue,
-    private readonly paperclipClient?: Pick<PaperclipClient, "getAgent" | "createIssue">,
+    private readonly paperclipClient?: Pick<PaperclipClient, "getAgent" | "createIssue" | "listCompanyAgents">,
     private readonly paraMemoryWriter: ParaMemoryWriter = new AgentHomeParaMemoryWriter(),
     private readonly channels?: SessionChannelLookup,
   ) {}
 
   async openSession(input: OpenSessionInput): Promise<ChatSession> {
     const participants = await this.resolveParticipants(input.channelId, input.participantIds);
+    await this.repository.syncChannelParticipants(input.channelId, participants);
     const session = await this.repository.createSession(input.channelId, participants);
     const isDmSession = await this.isDmChannel(input.channelId);
 
     const agentIds = participants
-      .filter(
-        (participant) =>
-          participant.participantType === "agent" &&
-          input.participantIds.includes(participant.participantId),
-      )
+      .filter((participant) => participant.participantType === "agent")
       .map((participant) => participant.participantId);
 
     if (this.paperclipClient) {
@@ -169,7 +169,9 @@ export class SessionManager {
       throw new SessionNotFoundError(sessionId);
     }
 
-    return this.repository.listSessionParticipants(sessionId);
+    const channel = await this.channels?.getChannel(session.channelId);
+    const participants = await this.repository.listSessionParticipants(sessionId);
+    return this.enrichParticipants(participants, channel ?? null, channel?.type === "company_general" || channel?.type === "project");
   }
 
   async recoverActiveSessions(): Promise<RecoveredSessionState[]> {
@@ -442,11 +444,16 @@ export class SessionManager {
   }
 
   private async resolveParticipants(channelId: string, participantIds: string[]): Promise<SessionParticipant[]> {
+    const channel = await this.channels?.getChannel(channelId);
     const knownParticipants = await this.repository.listChannelParticipants(channelId);
-    const byId = new Map(knownParticipants.map((participant) => [participant.participantId, participant]));
-    const fallbackCompanyId = knownParticipants[0]?.companyId ?? "unknown-company";
-
-    return Promise.all(
+    const enrichedKnown = await this.enrichParticipants(
+      knownParticipants,
+      channel ?? null,
+      channel?.type === "company_general" || channel?.type === "project",
+    );
+    const byId = new Map(enrichedKnown.map((participant) => [participant.participantId, participant]));
+    const fallbackCompanyId = channel?.companyId ?? knownParticipants[0]?.companyId ?? "unknown-company";
+    const resolved = await Promise.all(
       participantIds.map(async (participantId) => {
         const knownParticipant = byId.get(participantId);
         if (knownParticipant) {
@@ -455,24 +462,63 @@ export class SessionManager {
 
         if (this.paperclipClient) {
           try {
-            await this.paperclipClient.getAgent(participantId);
+            const agent = await this.paperclipClient.getAgent(participantId);
             return {
               participantId,
               participantType: "agent" as const,
-              companyId: fallbackCompanyId,
+              companyId: agent.companyId ?? fallbackCompanyId,
+              displayName: agent.name,
+              mentionLabel: slugifyMention(agent.urlKey ?? agent.name),
             };
           } catch {
             // Fall through to human classification when Paperclip has no matching agent.
           }
         }
 
+        const displayName = formatHumanDisplayName(participantId);
         return {
           participantId,
           participantType: "human" as const,
           companyId: fallbackCompanyId,
+          displayName,
+          mentionLabel: slugifyMention(displayName),
         };
       }),
     );
+
+    return dedupeParticipants([...enrichedKnown, ...resolved]);
+  }
+
+  private async enrichParticipants(
+    participants: SessionParticipant[],
+    channel: Channel | null,
+    includeCompanyAgents: boolean,
+  ): Promise<SessionParticipant[]> {
+    const byId = new Map<string, SessionParticipant>();
+    for (const participant of participants) {
+      byId.set(participant.participantId, normalizeParticipant(participant));
+    }
+
+    if (channel?.companyId && this.paperclipClient?.listCompanyAgents) {
+      const agents = await this.paperclipClient.listCompanyAgents(channel.companyId);
+      for (const agent of agents) {
+        if (isInternalChatAgent(agent.name, agent.urlKey)) {
+          continue;
+        }
+        if (!includeCompanyAgents && !byId.has(agent.id)) {
+          continue;
+        }
+        byId.set(agent.id, {
+          participantId: agent.id,
+          participantType: "agent",
+          companyId: agent.companyId ?? channel.companyId,
+          displayName: agent.name,
+          mentionLabel: slugifyMention(agent.urlKey ?? agent.name),
+        });
+      }
+    }
+
+    return [...byId.values()].map(normalizeParticipant);
   }
 
   private async crystallizeSession(session: ChatSession): Promise<string | undefined> {
@@ -498,6 +544,48 @@ export class SessionManager {
 
     return paperclipIssueId;
   }
+}
+
+function dedupeParticipants(participants: SessionParticipant[]): SessionParticipant[] {
+  const seen = new Set<string>();
+  return participants.filter((participant) => {
+    if (seen.has(participant.participantId)) {
+      return false;
+    }
+    seen.add(participant.participantId);
+    return true;
+  });
+}
+
+function normalizeParticipant(participant: SessionParticipant): SessionParticipant {
+  const displayName = participant.displayName ?? (
+    participant.participantType === "human"
+      ? formatHumanDisplayName(participant.participantId)
+      : participant.participantId
+  );
+  return {
+    ...participant,
+    displayName,
+    mentionLabel: participant.mentionLabel ?? slugifyMention(displayName),
+  };
+}
+
+function formatHumanDisplayName(participantId: string): string {
+  const normalized = participantId.replace(/^local-/, "");
+  const parts = normalized.split(/[-_]/g).filter(Boolean);
+  if (parts.length === 0) {
+    return participantId;
+  }
+
+  return parts.map((part) => part[0]!.toUpperCase() + part.slice(1)).join(" ");
+}
+
+function slugifyMention(value: string): string {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "participant";
+}
+
+function isInternalChatAgent(name?: string | null, urlKey?: string | null): boolean {
+  return name === "paperclip-chat-server" || urlKey === "paperclip-chat-server";
 }
 
 function readTaskId(content: string): string | null {

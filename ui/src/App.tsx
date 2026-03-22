@@ -10,7 +10,7 @@ import { NotificationPanel } from "./components/NotificationPanel.js";
 import { Sidebar } from "./components/Sidebar.js";
 import { StatusPill } from "./components/StatusPill.js";
 import { useChatWebSocket } from "./hooks/useChatWebSocket.js";
-import { PanelLeft, PanelRight, Lock, MessageSquareText, Sparkles, X } from "lucide-react";
+import { PanelLeft, PanelRight, Lock, X } from "lucide-react";
 
 export function App() {
   return (
@@ -38,7 +38,7 @@ function Shell() {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [mobileActivityOpen, setMobileActivityOpen] = useState(false);
   const [newDmOpen, setNewDmOpen] = useState(false);
-  const [newDmName, setNewDmName] = useState("");
+  const [newDmParticipantId, setNewDmParticipantId] = useState<string | null>(null);
   const [visibleEntryCount, setVisibleEntryCount] = useState(20);
   const [crystallizedIssueId, setCrystallizedIssueId] = useState<string | null>(null);
   const [crystallizeConfirmOpen, setCrystallizeConfirmOpen] = useState(false);
@@ -117,13 +117,19 @@ function Shell() {
     },
   });
   const createDmMutation = useMutation({
-    mutationFn: async (input: { companyId: string; name: string }) =>
+    mutationFn: async (input: { companyId: string; participant: SessionParticipant }) =>
       requestJson<Channel>(CHAT_API_PATHS.CHANNELS, {
         method: "POST",
         body: JSON.stringify({
           type: "dm",
           companyId: input.companyId,
-          name: input.name,
+          name: input.participant.displayName ?? input.participant.mentionLabel ?? "Direct message",
+          participants: [
+            {
+              participantType: input.participant.participantType,
+              participantId: input.participant.participantId,
+            },
+          ],
         }),
       }),
     onSuccess: (channel) => {
@@ -132,7 +138,7 @@ function Shell() {
         return existing.some((entry) => entry.id === channel.id) ? existing : [...existing, channel];
       });
       setNewDmOpen(false);
-      setNewDmName("");
+      setNewDmParticipantId(null);
       startTransition(() => {
         navigate(`/channels/${channel.id}${location.search}`);
       });
@@ -222,6 +228,12 @@ function Shell() {
     queryFn: async () =>
       requestJson<{ participants: SessionParticipant[] }>(`${CHAT_API_PATHS.SESSION(selectedSessionId!)}/participants`),
   });
+  const companyDirectoryQuery = useQuery({
+    queryKey: ["company-directory", companyId],
+    enabled: Boolean(companyId && newDmOpen),
+    queryFn: async () =>
+      requestJson<{ participants: SessionParticipant[] }>(CHAT_API_PATHS.COMPANY_DIRECTORY(companyId!)),
+  });
 
   useEffect(() => {
     if (!selectedChannel || usingFallbackChannels || sessionIdsByChannel[selectedChannel.id] || openSessionMutation.isPending) {
@@ -237,6 +249,12 @@ function Shell() {
     setStreamingEntry(null);
     setTypingAgents([]);
   }, [location.pathname, location.search]);
+
+  useEffect(() => {
+    if (!newDmOpen) {
+      setNewDmParticipantId(null);
+    }
+  }, [newDmOpen]);
 
   useEffect(() => {
     setHasOlderHistory(false);
@@ -257,6 +275,9 @@ function Shell() {
   const latestDecisionEntry = [...previewEntries].reverse().find((entry) => entry.isDecision) ?? liveDecision;
   const mentionCandidates = buildMentionCandidates(sessionParticipantsQuery.data?.participants ?? [], presenceByAgent);
   const mentionSuggestions = readMentionSuggestions(draft, mentionCandidates);
+  const dmDirectoryEntries = companyDirectoryQuery.data?.participants ?? [];
+  const selectedDmParticipant =
+    dmDirectoryEntries.find((participant) => participant.participantId === newDmParticipantId) ?? null;
   const previewsByChannel = Object.fromEntries(
     channels.map((channel) => {
       const preview = channel.id === selectedChannel?.id
@@ -439,52 +460,39 @@ function Shell() {
   }
 
   return (
-    <main className="min-h-screen bg-stone-100 text-neutral-950">
-      <div className="mx-auto flex min-h-screen max-w-[1600px] flex-col px-4 py-4 lg:px-6">
-        <header className="mb-4 rounded-lg border border-stone-200 bg-white/95 px-5 py-4 shadow-sm">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex items-center gap-4">
-              <div className="rounded-md border border-stone-200 bg-stone-100 p-3">
-                <MessageSquareText className="h-6 w-6" />
-              </div>
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-stone-500">
-                  Paperclip Chat
-                </p>
-                <h1 className="text-2xl font-semibold tracking-tight">{APP_NAME}</h1>
-              </div>
-            </div>
+    <main className="flex min-h-screen flex-col bg-white text-neutral-950">
+        <header className="flex h-12 shrink-0 items-center justify-between border-b border-stone-200 px-4">
+          <div className="flex items-center gap-3">
+            <h1 className="text-sm font-bold text-stone-900">{APP_NAME}</h1>
             <div className="flex items-center gap-2 lg:hidden">
               <button
                 type="button"
                 onClick={() => setMobileSidebarOpen(true)}
-                className="inline-flex items-center gap-2 rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-sm font-medium text-stone-700"
+                className="px-2 py-1 text-[13px] font-medium text-stone-600 transition-colors hover:text-stone-900"
               >
                 <PanelLeft className="h-4 w-4" />
-                Channels
               </button>
               <button
                 type="button"
                 onClick={() => setMobileActivityOpen(true)}
-                className="inline-flex items-center gap-2 rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-sm font-medium text-stone-700"
+                className="px-2 py-1 text-[13px] font-medium text-stone-600 transition-colors hover:text-stone-900"
               >
                 <PanelRight className="h-4 w-4" />
-                Activity
               </button>
             </div>
-            <div className="flex flex-wrap items-center gap-3 text-sm text-stone-600">
-              <StatusPill label="Server" value={healthQuery.data?.status ?? "loading"} tone={healthQuery.data?.status === "ok" ? "green" : "amber"} />
-              <StatusPill label="Paperclip" value={healthQuery.data?.paperclip ?? "pending"} tone={healthQuery.data?.paperclip === "connected" ? "green" : "amber"} />
-              <StatusPill label="Realtime" value={healthQuery.data?.ws ?? "pending"} tone={healthQuery.data?.ws === "running" ? "green" : "amber"} />
-              <div className="rounded-md border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-medium text-stone-600">
-                {companyId ? `companyId ${companyId.slice(0, 8)}…` : "Add ?companyId=<uuid> for live channels"}
-              </div>
-            </div>
+          </div>
+          <div className="flex items-center gap-1">
+            <StatusPill label="Server" value={healthQuery.data?.status ?? "…"} tone={healthQuery.data?.status === "ok" ? "green" : "amber"} />
+            <StatusPill label="Paperclip" value={healthQuery.data?.paperclip ?? "…"} tone={healthQuery.data?.paperclip === "connected" ? "green" : "amber"} />
+            <StatusPill label="Realtime" value={healthQuery.data?.ws ?? "…"} tone={healthQuery.data?.ws === "running" ? "green" : "amber"} />
+            <span className="ml-1 text-[10px] font-mono text-stone-400">
+              {companyId ? companyId.slice(0, 8) : "no company"}
+            </span>
           </div>
         </header>
 
-        <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[320px_minmax(0,1fr)_320px]">
-          <div className="hidden lg:block">
+        <div className="grid min-h-0 flex-1 lg:grid-cols-[240px_minmax(0,1fr)_280px]">
+          <div className="hidden border-r border-stone-200 lg:block">
             <Sidebar
               channels={channels}
               selectedChannelId={selectedChannelId}
@@ -503,81 +511,52 @@ function Shell() {
             />
           </div>
 
-          <section className="flex min-h-[640px] flex-col rounded-lg border border-stone-200 bg-white shadow-sm">
-            <div className="border-b border-stone-200 px-6 py-5">
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">
-                    Active Thread
-                  </p>
-                  <h2 className="mt-1 text-2xl font-semibold tracking-tight">
-                    {selectedChannel?.name ?? "No channel selected"}
-                  </h2>
-                  <p className="mt-2 max-w-3xl text-sm leading-6 text-stone-600">
-                    Transcript-style chat surface aligned with Paperclip’s run and inbox patterns.
-                    Session history hydrates from the backend when a live channel context is available.
-                    The thread is now session-backed, realtime, and can be explicitly closed from the UI.
-                  </p>
-                  {sessionState ? (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <span className="rounded-sm border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-medium text-stone-700">
-                        seq {sessionState.currentSeq}
-                      </span>
-                      <span className="rounded-sm border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-medium text-stone-700">
-                        window {sessionState.chunkWindowWTokens}w
-                      </span>
-                      <span className="rounded-sm border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-medium text-stone-700">
-                        verbatim {sessionState.verbatimKTokens}k
-                      </span>
-                    </div>
-                  ) : null}
-                  {agentStates.length > 0 ? (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {agentStates.map((state) => (
-                        <span
-                          key={state.id}
-                          className="inline-flex items-center gap-2 rounded-sm border border-stone-200 bg-white px-3 py-1.5 text-xs font-medium text-stone-700"
-                        >
-                          <span className={cn("h-2 w-2 rounded-full", agentStateToneClass(state.status))} />
-                          {state.participantId.slice(0, 6)} {state.status} · idle {state.idleTurnCount}
-                        </span>
-                      ))}
-                    </div>
-                  ) : null}
-                  {Object.keys(presenceByAgent).length > 0 ? (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {Object.entries(presenceByAgent).map(([agentId, presence]) => (
-                        <span
-                          key={agentId}
-                          className="inline-flex items-center gap-2 rounded-sm border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-medium text-stone-700"
-                        >
-                          <span className={cn("h-2 w-2 rounded-full", presenceToneClass(presence.status))} />
-                          {agentId.slice(0, 6)} {presence.status}
-                        </span>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
-                <div className="flex items-center gap-2 text-xs font-medium text-stone-500">
-                  <Sparkles className="h-4 w-4 text-amber-500" />
-                  {selectedSessionId ? `session ${selectedSessionId.slice(0, 8)}…` : "live shell"}
-                  {sessionClosed ? (
-                    <span className="rounded-sm border border-stone-200 bg-stone-100 px-2 py-1 text-[11px] uppercase tracking-[0.14em] text-stone-600">
-                      closed
-                    </span>
-                  ) : null}
-                  {selectedSessionId && !usingFallbackChannels ? (
-                    <button
-                      type="button"
-                      onClick={() => closeSessionMutation.mutate({ sessionId: selectedSessionId })}
-                      disabled={sessionClosed || closeSessionMutation.isPending}
-                      className="ml-2 inline-flex items-center gap-1 rounded-md border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-medium text-stone-700 transition hover:bg-stone-100 disabled:cursor-not-allowed disabled:text-stone-400"
-                    >
-                      {sessionClosed ? <Lock className="h-3.5 w-3.5" /> : <X className="h-3.5 w-3.5" />}
-                      {closeSessionMutation.isPending ? "Closing…" : sessionClosed ? "Session closed" : "Close session"}
-                    </button>
-                  ) : null}
-                </div>
+          <section className="flex min-h-0 flex-col">
+            <div className="flex h-12 shrink-0 items-center justify-between border-b border-stone-200 px-4">
+              <div className="flex items-center gap-3">
+                <h2 className="text-sm font-semibold text-stone-900">
+                  {selectedChannel?.name ?? "No channel selected"}
+                </h2>
+                {selectedSessionId ? (
+                  <span className="text-[10px] font-mono text-stone-400">
+                    seq {sessionState?.currentSeq ?? 0}
+                  </span>
+                ) : null}
+                {sessionClosed ? (
+                  <span className="rounded-full bg-stone-100 px-2 py-0.5 text-[10px] font-medium uppercase text-stone-500">
+                    closed
+                  </span>
+                ) : null}
+              </div>
+              <div className="flex items-center gap-2">
+                {agentStates.map((state) => (
+                  <span
+                    key={state.id}
+                    className="inline-flex items-center gap-1.5 text-xs text-stone-500"
+                  >
+                    <span className={cn("h-1.5 w-1.5 rounded-full", agentStateToneClass(state.status))} />
+                    {state.participantId.slice(0, 6)}
+                  </span>
+                ))}
+                {Object.entries(presenceByAgent).map(([agentId, presence]) => (
+                  <span
+                    key={agentId}
+                    className="inline-flex items-center gap-1.5 text-xs text-stone-500"
+                  >
+                    <span className={cn("h-1.5 w-1.5 rounded-full", presenceToneClass(presence.status))} />
+                    {agentId.slice(0, 6)}
+                  </span>
+                ))}
+                {selectedSessionId && !usingFallbackChannels ? (
+                  <button
+                    type="button"
+                    onClick={() => closeSessionMutation.mutate({ sessionId: selectedSessionId })}
+                    disabled={sessionClosed || closeSessionMutation.isPending}
+                    className="px-2 py-1 text-xs font-medium text-stone-500 transition-colors hover:text-stone-900 disabled:text-stone-300"
+                  >
+                    {closeSessionMutation.isPending ? "Closing…" : sessionClosed ? "" : "Close"}
+                  </button>
+                ) : null}
               </div>
             </div>
 
@@ -626,7 +605,7 @@ function Shell() {
               }}
             />
 
-            <div className="border-t border-stone-200 px-6 py-5">
+            <div className="border-t border-stone-200 px-4 py-3">
               <MessageInput
                 draft={draft}
                 onDraftChange={setDraft}
@@ -682,19 +661,20 @@ function Shell() {
             </div>
           </section>
 
-          <NotificationPanel
-            notifications={notifications}
-            selectedSessionId={selectedSessionId}
-            totalTokenCount={totalTokenCount}
-            tokenTurns={tokenTurns}
-            unauthenticated={unauthenticatedNotifications}
-            notificationsRoute={notificationsRoute}
-            pending={markNotificationsReadMutation.isPending}
-            onOpenChannel={(channelId) => navigate(`/channels/${channelId}${location.search}`)}
-            onMarkRead={(notificationIds) => markNotificationsReadMutation.mutate(notificationIds)}
-          />
+          <div className="hidden border-l border-stone-200 lg:block">
+            <NotificationPanel
+              notifications={notifications}
+              selectedSessionId={selectedSessionId}
+              totalTokenCount={totalTokenCount}
+              tokenTurns={tokenTurns}
+              unauthenticated={unauthenticatedNotifications}
+              notificationsRoute={notificationsRoute}
+              pending={markNotificationsReadMutation.isPending}
+              onOpenChannel={(channelId) => navigate(`/channels/${channelId}${location.search}`)}
+              onMarkRead={(notificationIds) => markNotificationsReadMutation.mutate(notificationIds)}
+            />
+          </div>
         </div>
-      </div>
       {mobileSidebarOpen ? (
         <div className="fixed inset-0 z-40 bg-black/30 px-4 py-4 lg:hidden">
           <div className="flex h-full max-w-sm flex-col">
@@ -775,7 +755,7 @@ function Shell() {
                 type="button"
                 onClick={() => {
                   setNewDmOpen(false);
-                  setNewDmName("");
+                  setNewDmParticipantId(null);
                 }}
                 className="rounded-md border border-stone-200 bg-stone-50 p-2 text-stone-600"
               >
@@ -786,30 +766,57 @@ function Shell() {
               className="mt-5"
               onSubmit={(event) => {
                 event.preventDefault();
-                if (!companyId || !newDmName.trim()) {
+                if (!companyId || !selectedDmParticipant) {
                   return;
                 }
                 createDmMutation.mutate({
                   companyId,
-                  name: newDmName.trim(),
+                  participant: selectedDmParticipant,
                 });
               }}
             >
-              <label className="block">
-                <span className="text-sm font-medium text-stone-700">Channel name</span>
-                <input
-                  value={newDmName}
-                  onChange={(event) => setNewDmName(event.target.value)}
-                  placeholder="Product leadership DM"
-                  className="mt-2 w-full rounded-md border border-stone-200 bg-stone-50 px-4 py-3 text-sm text-stone-900 outline-none transition focus:border-stone-400"
-                />
-              </label>
+              <div>
+                <p className="text-sm font-medium text-stone-700">Choose a participant</p>
+                <div className="mt-3 max-h-72 space-y-2 overflow-y-auto">
+                  {dmDirectoryEntries.map((participant) => (
+                    <button
+                      key={participant.participantId}
+                      type="button"
+                      onClick={() => setNewDmParticipantId(participant.participantId)}
+                      className={cn(
+                        "flex w-full items-center justify-between rounded-md border px-4 py-3 text-left transition",
+                        participant.participantId === newDmParticipantId
+                          ? "border-stone-900 bg-stone-100"
+                          : "border-stone-200 bg-stone-50 hover:bg-stone-100",
+                      )}
+                    >
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-medium text-stone-900">
+                          {participant.displayName ?? participant.mentionLabel ?? participant.participantId}
+                        </span>
+                        <span className="block truncate text-xs text-stone-500">
+                          @{participant.mentionLabel ?? participant.participantId}
+                        </span>
+                      </span>
+                      <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-stone-500">
+                        {participant.participantType}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+                {companyDirectoryQuery.isLoading ? (
+                  <p className="mt-3 text-sm text-stone-500">Loading company participants…</p>
+                ) : null}
+                {companyDirectoryQuery.isError ? (
+                  <p className="mt-3 text-sm text-red-600">Could not load company participants.</p>
+                ) : null}
+              </div>
               <div className="mt-5 flex items-center justify-end gap-3">
                 <button
                   type="button"
                   onClick={() => {
                     setNewDmOpen(false);
-                    setNewDmName("");
+                    setNewDmParticipantId(null);
                   }}
                   className="rounded-md border border-stone-200 bg-white px-4 py-2 text-sm font-medium text-stone-700"
                 >
@@ -817,7 +824,7 @@ function Shell() {
                 </button>
                 <button
                   type="submit"
-                  disabled={!companyId || !newDmName.trim() || createDmMutation.isPending}
+                  disabled={!companyId || !selectedDmParticipant || createDmMutation.isPending}
                   className="rounded-md bg-stone-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-stone-300"
                 >
                   {createDmMutation.isPending ? "Creating…" : "Create DM"}
@@ -1092,7 +1099,10 @@ function buildMentionCandidates(
     seen.add(participant.participantId);
     candidates.push({
       id: participant.participantId,
-      label: `${participant.participantType === "agent" ? "agent" : "user"}-${participant.participantId.slice(0, 6)}`,
+      label:
+        participant.mentionLabel ??
+        slugifyMentionCandidate(participant.displayName ?? `${participant.participantType}-${participant.participantId.slice(0, 6)}`),
+      displayName: participant.displayName ?? undefined,
       kind: participant.participantType,
     });
   }
@@ -1105,6 +1115,7 @@ function buildMentionCandidates(
     candidates.push({
       id: agentId,
       label: `agent-${agentId.slice(0, 6)}`,
+      displayName: undefined,
       kind: "agent",
     });
   }
@@ -1131,6 +1142,10 @@ function readMentionedIds(draft: string, candidates: MentionCandidate[]) {
   return candidates
     .filter((candidate) => lowered.includes(`@${candidate.label.toLowerCase()}`))
     .map((candidate) => candidate.id);
+}
+
+function slugifyMentionCandidate(value: string) {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "participant";
 }
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {

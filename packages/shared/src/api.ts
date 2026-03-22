@@ -1,5 +1,6 @@
 export const CHAT_API_PATHS = {
   CHANNELS: "/api/channels",
+  COMPANY_DIRECTORY: (companyId: string) => `/api/companies/${companyId}/directory`,
   CHANNEL: (id: string) => `/api/channels/${id}`,
   CHANNEL_MESSAGES: (id: string) => `/api/channels/${id}/messages`,
   CHANNEL_SUMMARY: (id: string) => `/api/channels/${id}/summary`,

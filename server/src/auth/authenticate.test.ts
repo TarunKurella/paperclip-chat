@@ -99,6 +99,34 @@ describe("authenticate", () => {
     expect(res.status).toHaveBeenCalledWith(401);
     expect(res.json).toHaveBeenCalledWith({ error: "Not authenticated" });
   });
+
+  it("allows an opt-in local dev human fallback", async () => {
+    const req: AuthenticatedRequest = {
+      headers: { host: "127.0.0.1:4000" },
+    };
+    const res = createResponse();
+    const next = vi.fn();
+
+    await authenticate(
+      req,
+      res,
+      next,
+      {
+        validateSession: vi.fn(),
+        validateAgentJwt: vi.fn(),
+      },
+      {
+        CHAT_TOKEN_SECRET: "secret",
+        CHAT_SERVICE_KEY: "service-secret",
+        CHAT_LOCAL_DEV_AUTH: "true",
+        CHAT_LOCAL_COMPANY_ID: "company-1",
+        CHAT_LOCAL_USER_ID: "local-user",
+      },
+    );
+
+    expect(next).toHaveBeenCalledOnce();
+    expect(req.principal).toEqual({ type: "human", id: "local-user", companyId: "company-1" });
+  });
 });
 
 describe("auth guards", () => {

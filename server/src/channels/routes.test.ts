@@ -16,6 +16,7 @@ describe("channelRoutes", () => {
         },
       ]),
       createChannel: vi.fn(),
+      listCompanyDirectory: vi.fn(),
     };
     const app = express();
     app.use(express.json());
@@ -37,6 +38,7 @@ describe("channelRoutes", () => {
         paperclipRefId: null,
         name: "DM",
       }),
+      listCompanyDirectory: vi.fn(),
     };
     const app = express();
     app.use(express.json());
@@ -56,6 +58,39 @@ describe("channelRoutes", () => {
       companyId: "11111111-1111-4111-8111-111111111111",
       name: "DM",
       paperclipRefId: undefined,
+      participants: [],
     });
+  });
+
+  it("returns directory entries for company DM creation", async () => {
+    const service = {
+      listChannels: vi.fn(),
+      createChannel: vi.fn(),
+      listCompanyDirectory: vi.fn().mockResolvedValue([
+        {
+          participantId: "agent-1",
+          participantType: "agent",
+          companyId: "11111111-1111-4111-8111-111111111111",
+          displayName: "CEO",
+          mentionLabel: "ceo",
+        },
+      ]),
+    };
+    const app = express();
+    app.use(express.json());
+    app.use("/api", channelRoutes(service as never));
+
+    const response = await request(app).get("/api/companies/11111111-1111-4111-8111-111111111111/directory");
+
+    expect(response.status).toBe(200);
+    expect(response.body.participants).toEqual([
+      {
+        participantId: "agent-1",
+        participantType: "agent",
+        companyId: "11111111-1111-4111-8111-111111111111",
+        displayName: "CEO",
+        mentionLabel: "ceo",
+      },
+    ]);
   });
 });

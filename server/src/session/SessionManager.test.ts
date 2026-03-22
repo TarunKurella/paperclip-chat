@@ -26,6 +26,13 @@ describe("SessionManager", () => {
 
   it("opens a session and creates agent states for agent participants", async () => {
     const fixture = createFixture({
+      channel: {
+        id: "channel-1",
+        type: "dm",
+        companyId: "company-1",
+        paperclipRefId: null,
+        name: "Direct",
+      },
       participants: [
         { participantId: "human-1", participantType: "human", companyId: "company-1" },
         { participantId: "agent-1", participantType: "agent", companyId: "company-1" },
@@ -39,12 +46,40 @@ describe("SessionManager", () => {
     });
 
     expect(session.id).toBe("session-1");
-    expect(fixture.repository.createSession).toHaveBeenCalledWith("channel-1", [
-      { participantId: "human-1", participantType: "human", companyId: "company-1" },
-      { participantId: "agent-2", participantType: "agent", companyId: "company-1" },
+    expect(fixture.repository.syncChannelParticipants).toHaveBeenCalledWith("channel-1", [
+      { participantId: "human-1", participantType: "human", companyId: "company-1", displayName: "Human 1", mentionLabel: "human-1" },
+      { participantId: "agent-1", participantType: "agent", companyId: "company-1", displayName: "Agent agent-1", mentionLabel: "agent-agent-1" },
+      { participantId: "agent-2", participantType: "agent", companyId: "company-1", displayName: "Agent agent-2", mentionLabel: "agent-agent-2" },
     ]);
-    expect(fixture.repository.createAgentStates).toHaveBeenCalledWith("session-1", ["agent-2"]);
+    expect(fixture.repository.createSession).toHaveBeenCalledWith("channel-1", [
+      { participantId: "human-1", participantType: "human", companyId: "company-1", displayName: "Human 1", mentionLabel: "human-1" },
+      { participantId: "agent-1", participantType: "agent", companyId: "company-1", displayName: "Agent agent-1", mentionLabel: "agent-agent-1" },
+      { participantId: "agent-2", participantType: "agent", companyId: "company-1", displayName: "Agent agent-2", mentionLabel: "agent-agent-2" },
+    ]);
+    expect(fixture.repository.createAgentStates).not.toHaveBeenCalled();
     expect(fixture.paperclipClient.getAgent).toHaveBeenCalledWith("agent-2");
+  });
+
+  it("auto-includes live company agents for project sessions", async () => {
+    const fixture = createFixture({
+      participants: [{ participantId: "human-1", participantType: "human", companyId: "company-1" }],
+      companyAgents: [
+        { id: "agent-1", companyId: "company-1", name: "CEO", urlKey: "ceo" },
+        { id: "agent-2", companyId: "company-1", name: "Founding Engineer", urlKey: "founding-engineer" },
+      ],
+    });
+
+    await fixture.manager.openSession({
+      channelId: "channel-1",
+      participantIds: ["human-1"],
+    });
+
+    expect(fixture.repository.createAgentStates).toHaveBeenCalledWith("session-1", ["agent-1", "agent-2"]);
+    expect(fixture.repository.createSession).toHaveBeenCalledWith("channel-1", [
+      { participantId: "human-1", participantType: "human", companyId: "company-1", displayName: "Human 1", mentionLabel: "human-1" },
+      { participantId: "agent-1", participantType: "agent", companyId: "company-1", displayName: "CEO", mentionLabel: "ceo" },
+      { participantId: "agent-2", participantType: "agent", companyId: "company-1", displayName: "Founding Engineer", mentionLabel: "founding-engineer" },
+    ]);
   });
 
   it("lists session participants", async () => {
@@ -58,8 +93,8 @@ describe("SessionManager", () => {
     const participants = await fixture.manager.listSessionParticipants("session-1");
 
     expect(participants).toEqual([
-      { participantId: "human-1", participantType: "human", companyId: "company-1" },
-      { participantId: "agent-1", participantType: "agent", companyId: "company-1" },
+      { participantId: "human-1", participantType: "human", companyId: "company-1", displayName: "Human 1", mentionLabel: "human-1" },
+      { participantId: "agent-1", participantType: "agent", companyId: "company-1", displayName: "Agent agent-1", mentionLabel: "agent-agent-1" },
     ]);
     expect(fixture.repository.listSessionParticipants).toHaveBeenCalledWith("session-1");
   });
@@ -368,6 +403,14 @@ function createFixture(overrides: Partial<FixtureOptions> = {}) {
     { participantId: "human-1", participantType: "human", companyId: "company-1" },
     { participantId: "agent-1", participantType: "agent", companyId: "company-1" },
   ];
+  const companyAgents = overrides.companyAgents ?? participants
+    .filter((participant) => participant.participantType === "agent")
+    .map((participant) => ({
+      id: participant.participantId,
+      companyId: participant.companyId,
+      name: participant.displayName ?? `Agent ${participant.participantId}`,
+      urlKey: participant.mentionLabel ?? `agent-${participant.participantId}`,
+    }));
   const agentStates = overrides.agentStates ?? [makeAgentState("agent-1")];
   const connectedUsers = overrides.connectedUsers ?? new Set<string>();
   const notifications: NotificationRecord[] = [];
@@ -391,6 +434,7 @@ function createFixture(overrides: Partial<FixtureOptions> = {}) {
     listTurns: vi.fn().mockResolvedValue(turns),
     listChannelParticipants: vi.fn().mockResolvedValue(participants),
     listSessionParticipants: vi.fn().mockResolvedValue(participants),
+    syncChannelParticipants: vi.fn().mockResolvedValue(undefined),
     getSessionSummary: vi.fn().mockResolvedValue(overrides.sessionSummary ?? null),
     listAgentStates: vi.fn().mockResolvedValue(agentStates),
     createAgentStates: vi.fn().mockResolvedValue(undefined),
@@ -429,12 +473,16 @@ function createFixture(overrides: Partial<FixtureOptions> = {}) {
   };
   const paperclipClient = {
     getAgent: vi.fn(async (agentId: string) => {
-      if (participants.some((participant) => participant.participantId === agentId && participant.participantType === "agent")) {
-        return { id: agentId, name: `Agent ${agentId}`, bootstrapPrompt: null };
+      if (
+        participants.some((participant) => participant.participantId === agentId && participant.participantType === "agent") ||
+        companyAgents.some((agent) => agent.id === agentId)
+      ) {
+        return { id: agentId, companyId: "company-1", name: `Agent ${agentId}`, urlKey: `agent-${agentId}`, bootstrapPrompt: null };
       }
 
       throw new Error("agent not found");
     }),
+    listCompanyAgents: vi.fn().mockResolvedValue(companyAgents),
     createIssue: vi.fn().mockResolvedValue({ id: "issue-1" }),
   };
   const paraMemoryWriter = {
@@ -515,6 +563,7 @@ interface FixtureOptions {
   turns: Turn[];
   channel: { id: string; type: "company_general" | "project" | "dm" | "task_thread"; companyId: string; paperclipRefId: string | null; name: string };
   participants: SessionParticipant[];
+  companyAgents: Array<{ id: string; companyId: string; name: string; urlKey: string }>;
   agentStates: AgentChannelState[];
   connectedUsers: Set<string>;
   tokensSinceLastChunk: number;

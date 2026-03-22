@@ -1,6 +1,6 @@
 import { and, asc, eq } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
-import { channels } from "@paperclip-chat/db";
+import { channelParticipants, channels } from "@paperclip-chat/db";
 import type { CreateChannel, Channel } from "@paperclip-chat/shared";
 import type { ChannelRepository } from "./service.js";
 
@@ -56,7 +56,7 @@ export class DbChannelRepository implements ChannelRepository {
     return row ? mapChannelRow(row) : null;
   }
 
-  async create(input: Omit<CreateChannel, "participants">): Promise<Channel> {
+  async create(input: CreateChannel): Promise<Channel> {
     const row = await this.db
       .insert(channels)
       .values({
@@ -67,6 +67,16 @@ export class DbChannelRepository implements ChannelRepository {
       })
       .returning()
       .then((results) => results[0]);
+
+    if (input.participants.length > 0) {
+      await this.db.insert(channelParticipants).values(
+        input.participants.map((participant) => ({
+          channelId: row.id,
+          participantId: participant.participantId,
+          participantType: participant.participantType,
+        })),
+      );
+    }
 
     return mapChannelRow(row);
   }

@@ -213,7 +213,16 @@ export class ChatWsHub {
       return;
     }
 
-    const turns = await this.replayProvider(sessionId, lastSeq);
+    let turns: Turn[];
+    try {
+      turns = await this.replayProvider(sessionId, lastSeq);
+    } catch (error) {
+      this.logger.warn(
+        `WS replay skipped for session ${sessionId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return;
+    }
+
     for (const turn of turns) {
       socket.send(
         serializeEnvelope({

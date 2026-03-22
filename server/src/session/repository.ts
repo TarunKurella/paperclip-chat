@@ -2,6 +2,7 @@ import {
   agentChannelStates,
   channelParticipants,
   chatSessions,
+  channels,
   notifications,
   sessionSummaries,
   turns,
@@ -103,6 +104,12 @@ export class DbSessionRepository implements SessionRepository, NotificationRepos
   }
 
   async listChannelParticipants(channelId: string): Promise<SessionParticipant[]> {
+    const channel = await this.db
+      .select({ companyId: channels.companyId })
+      .from(channels)
+      .where(eq(channels.id, channelId))
+      .limit(1)
+      .then((results) => results[0] ?? null);
     const rows = await this.db
       .select()
       .from(channelParticipants)
@@ -112,7 +119,7 @@ export class DbSessionRepository implements SessionRepository, NotificationRepos
     return rows.map((row) => ({
       participantId: row.participantId,
       participantType: row.participantType,
-      companyId: "unknown-company",
+      companyId: channel?.companyId ?? "unknown-company",
     }));
   }
 
@@ -123,6 +130,30 @@ export class DbSessionRepository implements SessionRepository, NotificationRepos
     }
 
     return this.listChannelParticipants(session.channelId);
+  }
+
+  async syncChannelParticipants(channelId: string, participants: SessionParticipant[]): Promise<void> {
+    if (participants.length === 0) {
+      return;
+    }
+
+    const existing = await this.db
+      .select({ participantId: channelParticipants.participantId })
+      .from(channelParticipants)
+      .where(eq(channelParticipants.channelId, channelId));
+    const existingIds = new Set(existing.map((row) => row.participantId));
+    const missing = participants.filter((participant) => !existingIds.has(participant.participantId));
+    if (missing.length === 0) {
+      return;
+    }
+
+    await this.db.insert(channelParticipants).values(
+      missing.map((participant) => ({
+        channelId,
+        participantId: participant.participantId,
+        participantType: participant.participantType,
+      })),
+    );
   }
 
   async getSessionSummary(sessionId: string): Promise<SessionSummary | null> {

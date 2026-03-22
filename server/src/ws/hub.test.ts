@@ -95,6 +95,24 @@ describe("ChatWsHub", () => {
     client.close();
   });
 
+  it("swallows replay errors for stale sessions", async () => {
+    const { url, hub, close } = await startHubServer();
+    servers.push({ close });
+
+    hub.setReplayProvider(async () => {
+      throw new Error("Chat session not found: stale-session");
+    });
+
+    const client = new WebSocket(`${url}/ws?token=service-secret`);
+    await waitForOpen(client);
+
+    client.send(JSON.stringify({ type: "subscribe", channelId: "channel-1", sessionId: "stale-session", lastSeq: 9 }));
+    await delay(50);
+
+    expect(client.readyState).toBe(WebSocket.OPEN);
+    client.close();
+  });
+
   it("broadcasts notifications to connected users", async () => {
     const { url, hub, close, paperclipClient } = await startHubServer();
     servers.push({ close });

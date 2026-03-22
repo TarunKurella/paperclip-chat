@@ -29,7 +29,7 @@ export class InMemoryChannelRepository implements ChannelRepository {
     ) ?? null;
   }
 
-  async create(input: Omit<CreateChannel, "participants">): Promise<Channel> {
+  async create(input: CreateChannel): Promise<Channel> {
     const channel: Channel = {
       id: crypto.randomUUID(),
       type: input.type,

@@ -46,6 +46,15 @@ export async function authenticate(
     }
   }
 
+  if (shouldAllowLocalDevHuman(req, env)) {
+    req.principal = {
+      type: "human",
+      id: env.CHAT_LOCAL_USER_ID?.trim() || "local-operator",
+      companyId: env.CHAT_LOCAL_COMPANY_ID!.trim(),
+    };
+    return next();
+  }
+
   return res.status(401).json({ error: "Not authenticated" });
 }
 
@@ -149,4 +158,25 @@ function createPassthroughResponse(res: AuthenticatedResponse): AuthenticatedRes
     status: () => res,
     json: () => null,
   };
+}
+
+function shouldAllowLocalDevHuman(req: AuthenticatedRequest, env: NodeJS.ProcessEnv): boolean {
+  if (env.CHAT_LOCAL_DEV_AUTH !== "true") {
+    return false;
+  }
+
+  const companyId = env.CHAT_LOCAL_COMPANY_ID?.trim();
+  if (!companyId) {
+    return false;
+  }
+
+  const host = req.headers?.host ?? "";
+  const origin = req.headers?.origin ?? "";
+  const localhostRequest =
+    host.includes("127.0.0.1") ||
+    host.includes("localhost") ||
+    origin.includes("127.0.0.1") ||
+    origin.includes("localhost");
+
+  return localhostRequest;
 }

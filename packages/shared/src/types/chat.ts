@@ -34,6 +34,8 @@ export interface SessionParticipant {
   participantId: string;
   participantType: ChannelParticipantType;
   companyId: string;
+  displayName?: string | null;
+  mentionLabel?: string | null;
 }
 
 export interface ChatSession {

@@ -3,9 +3,11 @@ import { z } from "zod";
 
 const agentSchema = z.object({
   id: z.string(),
+  companyId: z.string().optional(),
   name: z.string(),
   adapterType: z.string().optional(),
   role: z.string().optional(),
+  urlKey: z.string().optional(),
   workspaceDir: z.string().nullable().optional(),
   bootstrapPrompt: z.string().nullable().optional(),
 });
@@ -60,6 +62,15 @@ const currentAgentSchema = z.object({
   companyId: z.string(),
 });
 
+const companyMemberSchema = z.object({
+  id: z.string(),
+  companyId: z.string(),
+  principalType: z.enum(["user", "agent"]),
+  principalId: z.string(),
+  status: z.string().optional(),
+  membershipRole: z.string().optional(),
+});
+
 const workspaceSchema = z.object({
   projectId: z.string().optional(),
   workspaceDir: z.string().nullable().optional(),
@@ -74,6 +85,7 @@ export type PaperclipProject = z.infer<typeof projectSchema>;
 export type PaperclipIssue = z.infer<typeof issueSchema>;
 export type PaperclipSessionValidation = z.infer<typeof sessionValidationSchema>;
 export type PaperclipCurrentAgent = z.infer<typeof currentAgentSchema>;
+export type PaperclipCompanyMember = z.infer<typeof companyMemberSchema>;
 
 export interface PaperclipClientOptions {
   baseUrl: string;
@@ -153,6 +165,19 @@ export class PaperclipClient {
       ...project,
       companyId: project.companyId ?? companyId,
     }));
+  }
+
+  async listCompanyAgents(companyId: string): Promise<PaperclipAgent[]> {
+    const payload = await this.requestJson(`/api/companies/${companyId}/agents`);
+    const parsed = agentsListSchema.parse(payload);
+    return (Array.isArray(parsed) ? parsed : parsed.agents).map((agent) => ({
+      ...agent,
+      companyId: agent.companyId ?? companyId,
+    }));
+  }
+
+  async listCompanyMembers(companyId: string): Promise<PaperclipCompanyMember[]> {
+    return z.array(companyMemberSchema).parse(await this.requestJson(`/api/companies/${companyId}/members`));
   }
 
   async createIssue(companyId: string, issue: Record<string, unknown>): Promise<PaperclipIssue> {

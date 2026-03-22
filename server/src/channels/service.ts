@@ -1,4 +1,4 @@
-import type { CreateChannel, Channel } from "@paperclip-chat/shared";
+import type { CreateChannel, Channel, SessionParticipant } from "@paperclip-chat/shared";
 import type { PaperclipClient, PaperclipCompany } from "../adapters/paperclipClient.js";
 
 export interface PaperclipProject {
@@ -12,7 +12,7 @@ export interface ChannelRepository {
   getById(channelId: string): Promise<Channel | null>;
   findCompanyGeneral(companyId: string): Promise<Channel | null>;
   findProjectChannel(companyId: string, paperclipRefId: string): Promise<Channel | null>;
-  create(input: Omit<CreateChannel, "participants">): Promise<Channel>;
+  create(input: CreateChannel): Promise<Channel>;
 }
 
 export interface SeedChannelsResult {
@@ -21,10 +21,12 @@ export interface SeedChannelsResult {
   projects: number;
 }
 
+export interface CompanyDirectoryEntry extends SessionParticipant {}
+
 export class ChannelService {
   constructor(
     private readonly repository: ChannelRepository,
-    private readonly paperclipClient: Pick<PaperclipClient, "listCompanies" | "listProjects">,
+    private readonly paperclipClient: Pick<PaperclipClient, "listCompanies" | "listProjects" | "listCompanyAgents" | "listCompanyMembers">,
   ) {}
 
   async listChannels(companyId: string): Promise<Channel[]> {
@@ -35,8 +37,40 @@ export class ChannelService {
     return this.repository.getById(channelId);
   }
 
-  async createChannel(input: Omit<CreateChannel, "participants">): Promise<Channel> {
+  async createChannel(input: CreateChannel): Promise<Channel> {
+    if (input.type === "dm" && input.participants.length !== 1) {
+      throw new Error("DM channels require exactly one target participant");
+    }
+
     return this.repository.create(input);
+  }
+
+  async listCompanyDirectory(companyId: string): Promise<CompanyDirectoryEntry[]> {
+    const [members, agents] = await Promise.all([
+      this.paperclipClient.listCompanyMembers(companyId),
+      this.paperclipClient.listCompanyAgents(companyId),
+    ]);
+
+    const humans = members
+      .filter((member) => member.principalType === "user")
+      .map<CompanyDirectoryEntry>((member) => ({
+        participantId: member.principalId,
+        participantType: "human",
+        companyId,
+        displayName: humanDisplayName(member.principalId),
+        mentionLabel: slugifyName(humanDisplayName(member.principalId)),
+      }));
+    const companyAgents = agents
+      .filter((agent) => !isInternalChatAgent(agent.name, agent.urlKey))
+      .map<CompanyDirectoryEntry>((agent) => ({
+        participantId: agent.id,
+        participantType: "agent",
+        companyId,
+        displayName: agent.name,
+        mentionLabel: agent.urlKey ?? slugifyName(agent.name),
+      }));
+
+    return dedupeEntries([...humans, ...companyAgents]);
   }
 
   async seedChannels(): Promise<SeedChannelsResult> {
@@ -75,6 +109,7 @@ export class ChannelService {
       companyId: company.id,
       name: company.name?.trim() ? `${company.name} General` : "Company General",
       paperclipRefId: company.id,
+      participants: [],
     });
     return 1;
   }
@@ -90,7 +125,37 @@ export class ChannelService {
       companyId: project.companyId,
       name: project.name,
       paperclipRefId: project.id,
+      participants: [],
     });
     return 1;
   }
+}
+
+function dedupeEntries(entries: CompanyDirectoryEntry[]): CompanyDirectoryEntry[] {
+  const seen = new Set<string>();
+  return entries.filter((entry) => {
+    if (seen.has(entry.participantId)) {
+      return false;
+    }
+    seen.add(entry.participantId);
+    return true;
+  });
+}
+
+function humanDisplayName(principalId: string): string {
+  const normalized = principalId.replace(/^local-/, "");
+  const parts = normalized.split(/[-_]/g).filter(Boolean);
+  if (parts.length === 0) {
+    return principalId;
+  }
+
+  return parts.map((part) => part[0]!.toUpperCase() + part.slice(1)).join(" ");
+}
+
+function slugifyName(value: string): string {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "participant";
+}
+
+function isInternalChatAgent(name?: string, urlKey?: string): boolean {
+  return name === "paperclip-chat-server" || urlKey === "paperclip-chat-server";
 }

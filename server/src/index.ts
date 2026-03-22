@@ -210,6 +210,21 @@ export async function bootstrapServer(envSource: NodeJS.ProcessEnv = process.env
       authenticate: authenticateMiddleware,
       requireAny: requireAnyMiddleware,
       requireHumanOrService: requireHumanOrServiceMiddleware,
+    }, {
+      onChannelCreated: async (channel, input) => {
+        if (input.participants.length === 0) {
+          return;
+        }
+
+        await sessionRepository.syncChannelParticipants(
+          channel.id,
+          input.participants.map((participant) => ({
+            participantId: participant.participantId,
+            participantType: participant.participantType,
+            companyId: channel.companyId,
+          })),
+        );
+      },
     }),
   );
   app.use(
