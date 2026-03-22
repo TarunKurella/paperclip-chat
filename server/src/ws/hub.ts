@@ -100,6 +100,16 @@ export class ChatWsHub {
     }
   }
 
+  broadcastToCompany(companyId: string, event: Omit<WsEnvelope, "timestamp">): void {
+    const message = serializeEnvelope(event);
+    for (const [socket, state] of this.clients.entries()) {
+      if (state.principal.companyId !== companyId) {
+        continue;
+      }
+      socket.send(message);
+    }
+  }
+
   isUserConnected(userId: string): boolean {
     for (const state of this.clients.values()) {
       if (state.principal.type === "human" && state.principal.id === userId) {

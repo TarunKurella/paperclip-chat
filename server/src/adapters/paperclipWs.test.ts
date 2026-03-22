@@ -55,6 +55,37 @@ describe("PaperclipWsSubscription", () => {
     expect(logger.info).toHaveBeenCalledWith("Paperclip agent.status agent-1=running");
   });
 
+  it("forwards agent.status events to the configured callback", () => {
+    const socket = new FakeSocket();
+    const onAgentStatus = vi.fn();
+    const client = new PaperclipWsSubscription(
+      {
+        baseUrl: "http://localhost:3100",
+        companyId: "company-1",
+        serviceKey: "secret",
+        onAgentStatus,
+      },
+      createLogger(),
+      vi.fn(() => socket),
+    );
+
+    client.start();
+    socket.emit(
+      "message",
+      JSON.stringify({
+        type: "agent.status",
+        timestamp: "2026-03-21T20:00:00.000Z",
+        payload: { agentId: "agent-1", status: "running" },
+      }),
+    );
+
+    expect(onAgentStatus).toHaveBeenCalledWith({
+      agentId: "agent-1",
+      status: "running",
+      timestamp: "2026-03-21T20:00:00.000Z",
+    });
+  });
+
   it("reconnects with exponential backoff after disconnect", () => {
     const firstSocket = new FakeSocket();
     const secondSocket = new FakeSocket();

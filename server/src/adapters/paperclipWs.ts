@@ -18,6 +18,7 @@ export interface PaperclipWsConfig {
   companyId: string;
   serviceKey: string;
   reconnectDelaysMs?: number[];
+  onAgentStatus?: (event: AgentStatusEvent) => void;
 }
 
 export interface PaperclipWsLogger {
@@ -109,6 +110,7 @@ export class PaperclipWsSubscription {
       }
 
       this.presence.update(event);
+      this.config.onAgentStatus?.(event);
       this.logger.info(`Paperclip agent.status ${event.agentId}=${event.status}`);
     });
     socket.on("close", () => {

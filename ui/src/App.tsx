@@ -17,6 +17,7 @@ export function App() {
   const companyId = readCompanyId();
   const [selectedChannelId, setSelectedChannelId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  const [presenceByAgent, setPresenceByAgent] = useState<Record<string, { status: string; updatedAt: string }>>({});
   const [optimisticMessages, setOptimisticMessages] = useState<Record<string, ThreadEntry[]>>({});
   const [sessionIdsByChannel, setSessionIdsByChannel] = useState<Record<string, string>>({});
   const healthQuery = useQuery({
@@ -207,6 +208,22 @@ export function App() {
         return;
       }
 
+      if (envelope.type === "agent.status") {
+        const presence = readPresencePayload(envelope.payload);
+        if (!presence) {
+          return;
+        }
+
+        setPresenceByAgent((current) => ({
+          ...current,
+          [presence.agentId]: {
+            status: presence.status,
+            updatedAt: presence.updatedAt,
+          },
+        }));
+        return;
+      }
+
       if (envelope.type === "session.closed") {
         const closedSessionId = readSessionClosedPayload(envelope.payload);
         if (!closedSessionId || !selectedSessionId || closedSessionId !== selectedSessionId) {
@@ -340,6 +357,19 @@ export function App() {
                     Session history hydrates from the backend when a live channel context is available.
                     The thread is now session-backed, realtime, and can be explicitly closed from the UI.
                   </p>
+                  {Object.keys(presenceByAgent).length > 0 ? (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {Object.entries(presenceByAgent).map(([agentId, presence]) => (
+                        <span
+                          key={agentId}
+                          className="inline-flex items-center gap-2 rounded-full border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-medium text-stone-700"
+                        >
+                          <span className={["h-2 w-2 rounded-full", presenceToneClass(presence.status)].join(" ")} />
+                          {agentId.slice(0, 6)} {presence.status}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
                 <div className="flex items-center gap-2 text-xs font-medium text-stone-500">
                   <Sparkles className="h-4 w-4 text-amber-500" />
@@ -738,6 +768,30 @@ function readSessionClosedPayload(value: unknown): string | null {
   }
 
   return value.sessionId;
+}
+
+function readPresencePayload(value: unknown): { agentId: string; status: string; updatedAt: string } | null {
+  if (!isRecord(value) || typeof value.agentId !== "string" || typeof value.status !== "string") {
+    return null;
+  }
+
+  return {
+    agentId: value.agentId,
+    status: value.status,
+    updatedAt: typeof value.timestamp === "string" ? value.timestamp : new Date().toISOString(),
+  };
+}
+
+function presenceToneClass(status: string) {
+  switch (status) {
+    case "running":
+    case "busy":
+      return "bg-emerald-500";
+    case "idle":
+      return "bg-stone-400";
+    default:
+      return "bg-amber-500";
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -89,6 +89,45 @@ describe("ChatWsHub", () => {
     client.close();
   });
 
+  it("broadcasts company-scoped presence events to matching principals", async () => {
+    const { url, hub, close, paperclipClient } = await startHubServer();
+    servers.push({ close });
+
+    vi.mocked(paperclipClient.validateSession).mockResolvedValueOnce({
+      userId: "user-1",
+      companyId: "company-1",
+    });
+    vi.mocked(paperclipClient.validateSession).mockResolvedValueOnce({
+      userId: "user-2",
+      companyId: "company-2",
+    });
+
+    const companyOneClient = new WebSocket(`${url}/ws`, {
+      headers: { Cookie: "paperclip-session=one" },
+    });
+    const companyTwoClient = new WebSocket(`${url}/ws`, {
+      headers: { Cookie: "paperclip-session=two" },
+    });
+    await Promise.all([waitForOpen(companyOneClient), waitForOpen(companyTwoClient)]);
+
+    const messagePromise = waitForMessage(companyOneClient);
+    const nonMatchingMessages: string[] = [];
+    companyTwoClient.on("message", (message) => nonMatchingMessages.push(message.toString()));
+
+    hub.broadcastToCompany("company-1", {
+      type: CHAT_EVENT_TYPES.AGENT_STATUS,
+      payload: { agentId: "agent-1", status: "running" },
+    });
+
+    const message = JSON.parse(await messagePromise);
+    expect(message.type).toBe(CHAT_EVENT_TYPES.AGENT_STATUS);
+    expect(message.payload).toEqual({ agentId: "agent-1", status: "running" });
+    expect(nonMatchingMessages).toHaveLength(0);
+
+    companyOneClient.close();
+    companyTwoClient.close();
+  });
+
   it("terminates dead connections after two missed pongs", () => {
     const hub = new ChatWsHub(
       {

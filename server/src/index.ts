@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express, { type Express } from "express";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
+import { CHAT_EVENT_TYPES } from "@paperclip-chat/shared";
 import { PaperclipWsSubscription } from "./adapters/paperclipWs.js";
 import { PaperclipClient } from "./adapters/paperclipClient.js";
 import { createAuthenticateMiddleware, requireAnyMiddleware, requireHumanMiddleware, requireHumanOrServiceMiddleware } from "./auth/express.js";
@@ -51,6 +52,12 @@ export async function bootstrapServer(envSource: NodeJS.ProcessEnv = process.env
       baseUrl: env.paperclipApiUrl,
       companyId: company.id,
       serviceKey: lifecycle.serviceAccount?.liveEventsToken ?? env.chatServiceKey,
+      onAgentStatus: (event) => {
+        hub.broadcastToCompany(company.id, {
+          type: CHAT_EVENT_TYPES.AGENT_STATUS,
+          payload: event,
+        });
+      },
     });
     subscription.start();
     return subscription;
