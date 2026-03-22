@@ -60,9 +60,9 @@ export function sessionRoutes(
     auth.requireAny ?? passThrough,
     async (req, res) => {
       const sessionId = readParam(req.params.id);
-      closeSessionSchema.parse(req.body ?? {});
-      const session = await sessionManager.closeSession(sessionId);
-      res.json({ session });
+      const { crystallize } = closeSessionSchema.parse(req.body ?? {});
+      const result = await sessionManager.closeSession({ sessionId, crystallize });
+      res.json(result);
     },
   );
 

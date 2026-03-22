@@ -1,3 +1,5 @@
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { CHAT_DEFAULTS, CHAT_EVENT_TYPES, type AgentChannelState, type ChatSession, type Notification, type Turn } from "@paperclip-chat/shared";
 import type { TrunkManager } from "../context/TrunkManager.js";
 import type { PaperclipClient } from "../adapters/paperclipClient.js";
@@ -64,9 +66,23 @@ export interface OpenSessionInput {
   participantIds: string[];
 }
 
+export interface CloseSessionInput {
+  sessionId: string;
+  crystallize?: boolean;
+}
+
 export interface SessionDetails {
   session: ChatSession;
   agentStates: AgentChannelState[];
+}
+
+export interface CloseSessionResult {
+  session: ChatSession;
+  paperclipIssueId?: string;
+}
+
+export interface ParaMemoryWriter {
+  write(agentIds: string[], sessionId: string, content: string): Promise<void>;
 }
 
 export class SessionNotFoundError extends Error {
@@ -84,7 +100,8 @@ export class SessionManager {
     private readonly notifications: NotificationRepository,
     private readonly debounce: AgentWakeupQueue,
     private readonly chunkQueue: ChunkQueue,
-    private readonly paperclipClient?: Pick<PaperclipClient, "getAgent">,
+    private readonly paperclipClient?: Pick<PaperclipClient, "getAgent" | "createIssue">,
+    private readonly paraMemoryWriter: ParaMemoryWriter = new AgentHomeParaMemoryWriter(),
   ) {}
 
   async openSession(input: OpenSessionInput): Promise<ChatSession> {
@@ -120,7 +137,19 @@ export class SessionManager {
     return { session, agentStates };
   }
 
-  async closeSession(sessionId: string): Promise<ChatSession> {
+  async closeSession(input: string | CloseSessionInput): Promise<CloseSessionResult> {
+    const sessionId = typeof input === "string" ? input : input.sessionId;
+    const crystallize = typeof input === "string" ? false : (input.crystallize ?? false);
+    const currentSession = await this.repository.getSession(sessionId);
+    if (!currentSession) {
+      throw new SessionNotFoundError(sessionId);
+    }
+
+    let paperclipIssueId: string | undefined;
+    if (crystallize) {
+      paperclipIssueId = await this.crystallizeSession(currentSession);
+    }
+
     const session = await this.repository.closeSession(sessionId);
     if (!session) {
       throw new SessionNotFoundError(sessionId);
@@ -131,7 +160,7 @@ export class SessionManager {
       payload: { sessionId: session.id },
     });
 
-    return session;
+    return paperclipIssueId ? { session, paperclipIssueId } : { session };
   }
 
   async getTokenUsage(sessionId: string): Promise<Turn[]> {
@@ -334,6 +363,29 @@ export class SessionManager {
       }),
     );
   }
+
+  private async crystallizeSession(session: ChatSession): Promise<string | undefined> {
+    const participants = await this.repository.listSessionParticipants(session.id);
+    const turns = await this.repository.listTurns(session.id, { limit: 200 });
+    const summary = buildCrystallizeSummary(session, participants, turns);
+    const companyId = participants[0]?.companyId;
+
+    let paperclipIssueId: string | undefined;
+    if (companyId && this.paperclipClient) {
+      const issue = await this.paperclipClient.createIssue(companyId, {
+        title: `[CHAT] ${session.channelId} / ${session.id.slice(0, 8)}`,
+        description: summary,
+      });
+      paperclipIssueId = issue.id;
+    }
+
+    const agentIds = participants
+      .filter((participant) => participant.participantType === "agent")
+      .map((participant) => participant.participantId);
+    await this.paraMemoryWriter.write(agentIds, session.id, summary);
+
+    return paperclipIssueId;
+  }
 }
 
 function readTaskId(content: string): string | null {
@@ -344,4 +396,46 @@ function readTaskId(content: string): string | null {
 
   const issueMatch = content.match(/\b(?:issue|task)[#:\s]+([A-Za-z0-9_-]+)/i);
   return issueMatch?.[1] ?? null;
+}
+
+function buildCrystallizeSummary(
+  session: ChatSession,
+  participants: SessionParticipant[],
+  turns: Turn[],
+): string {
+  const participantLines = participants.length
+    ? participants.map((participant) => `- ${participant.participantType}: ${participant.participantId}`).join("\n")
+    : "- none";
+  const decisionTurn = [...turns].reverse().find((turn) => turn.isDecision);
+  const recentTurns = turns.length
+    ? turns.slice(-10).map((turn) => `- ${turn.fromParticipantId}: ${turn.content}`).join("\n")
+    : "- none";
+
+  return [
+    "# paperclip-chat crystallize",
+    "",
+    `Session: ${session.id}`,
+    `Channel: ${session.channelId}`,
+    "",
+    "Participants:",
+    participantLines,
+    "",
+    "Decision:",
+    decisionTurn?.content ?? "No explicit [DECISION] turn was captured.",
+    "",
+    "Recent turns:",
+    recentTurns,
+  ].join("\n");
+}
+
+class AgentHomeParaMemoryWriter implements ParaMemoryWriter {
+  async write(agentIds: string[], sessionId: string, content: string): Promise<void> {
+    await Promise.all(
+      agentIds.map(async (agentId) => {
+        const workspaceDir = path.join(process.env.HOME ?? ".", ".paperclip", "agents", agentId, "workspace");
+        await mkdir(workspaceDir, { recursive: true });
+        await writeFile(path.join(workspaceDir, `${sessionId}-crystallize.md`), content, "utf8");
+      }),
+    );
+  }
 }

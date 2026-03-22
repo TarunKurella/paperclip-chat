@@ -90,7 +90,7 @@ describe("sessionRoutes", () => {
     const sessionManager = {
       openSession: vi.fn(),
       processTurn: vi.fn(),
-      closeSession: vi.fn().mockResolvedValue({ id: "session-1", status: "closed" }),
+      closeSession: vi.fn().mockResolvedValue({ session: { id: "session-1", status: "closed" } }),
       getSessionState: vi.fn(),
       getTokenUsage: vi.fn(),
       listMessages: vi.fn(),
@@ -104,7 +104,32 @@ describe("sessionRoutes", () => {
     const response = await request(app).post("/api/sessions/session-1/close").send({});
 
     expect(response.status).toBe(200);
-    expect(sessionManager.closeSession).toHaveBeenCalledWith("session-1");
+    expect(sessionManager.closeSession).toHaveBeenCalledWith({ sessionId: "session-1", crystallize: false });
+  });
+
+  it("passes the crystallize flag through to closeSession", async () => {
+    const sessionManager = {
+      openSession: vi.fn(),
+      processTurn: vi.fn(),
+      closeSession: vi.fn().mockResolvedValue({
+        session: { id: "session-1", status: "closed" },
+        paperclipIssueId: "issue-1",
+      }),
+      getSessionState: vi.fn(),
+      getTokenUsage: vi.fn(),
+      listMessages: vi.fn(),
+    };
+
+    const app = express();
+    app.use(express.json());
+    app.use(injectPrincipal());
+    app.use("/api", sessionRoutes(sessionManager as never));
+
+    const response = await request(app).post("/api/sessions/session-1/close").send({ crystallize: true });
+
+    expect(response.status).toBe(200);
+    expect(response.body.paperclipIssueId).toBe("issue-1");
+    expect(sessionManager.closeSession).toHaveBeenCalledWith({ sessionId: "session-1", crystallize: true });
   });
 
   it("returns session state", async () => {

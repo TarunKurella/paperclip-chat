@@ -50,14 +50,50 @@ describe("SessionManager", () => {
   it("closes a session and emits a session.closed event", async () => {
     const fixture = createFixture();
 
-    const session = await fixture.manager.closeSession("session-1");
+    const result = await fixture.manager.closeSession("session-1");
 
-    expect(session.id).toBe("session-1");
+    expect(result.session.id).toBe("session-1");
     expect(fixture.repository.closeSession).toHaveBeenCalledWith("session-1");
     expect(fixture.hub.broadcast).toHaveBeenCalledWith("channel-1", {
       type: CHAT_EVENT_TYPES.SESSION_CLOSED,
       payload: { sessionId: "session-1" },
     });
+  });
+
+  it("crystallizes a session into a Paperclip issue and writes para-memory", async () => {
+    const fixture = createFixture({
+      participants: [
+        { participantId: "human-1", participantType: "human", companyId: "company-1" },
+        { participantId: "agent-1", participantType: "agent", companyId: "company-1" },
+      ],
+      turns: [
+        makeTurn(),
+        {
+          ...makeTurn(),
+          id: "turn-2",
+          seq: 2,
+          fromParticipantId: "agent-1",
+          content: "[DECISION] Ship the rollout",
+          isDecision: true,
+        },
+      ],
+    });
+
+    const result = await fixture.manager.closeSession({ sessionId: "session-1", crystallize: true });
+
+    expect(fixture.paperclipClient.createIssue).toHaveBeenCalledWith(
+      "company-1",
+      expect.objectContaining({
+        title: expect.stringContaining("[CHAT]"),
+        description: expect.stringContaining("[DECISION] Ship the rollout"),
+      }),
+    );
+    expect(fixture.paraMemoryWriter.write).toHaveBeenCalledWith(
+      ["agent-1"],
+      "session-1",
+      expect.stringContaining("Participants:"),
+    );
+    expect(result.paperclipIssueId).toBe("issue-1");
   });
 
   it("creates notifications for offline humans only", async () => {
@@ -199,6 +235,7 @@ describe("SessionManager", () => {
 function createFixture(overrides: Partial<FixtureOptions> = {}) {
   const session = overrides.session === undefined ? makeSession() : overrides.session;
   const turn = overrides.turn ?? makeTurn();
+  const turns = overrides.turns ?? [turn];
   const participants = overrides.participants ?? [
     { participantId: "human-1", participantType: "human", companyId: "company-1" },
     { participantId: "agent-1", participantType: "agent", companyId: "company-1" },
@@ -215,7 +252,7 @@ function createFixture(overrides: Partial<FixtureOptions> = {}) {
     closeSession: vi.fn().mockResolvedValue(session),
     getSession: vi.fn().mockResolvedValue(session),
     getTokensSinceLastChunk: vi.fn().mockResolvedValue(overrides.tokensSinceLastChunk ?? 0),
-    listTurns: vi.fn().mockResolvedValue([turn]),
+    listTurns: vi.fn().mockResolvedValue(turns),
     listChannelParticipants: vi.fn().mockResolvedValue(participants),
     listSessionParticipants: vi.fn().mockResolvedValue(participants),
     listAgentStates: vi.fn().mockResolvedValue(agentStates),
@@ -258,10 +295,14 @@ function createFixture(overrides: Partial<FixtureOptions> = {}) {
 
       throw new Error("agent not found");
     }),
+    createIssue: vi.fn().mockResolvedValue({ id: "issue-1" }),
+  };
+  const paraMemoryWriter = {
+    write: vi.fn().mockResolvedValue(undefined),
   };
 
   return {
-    manager: new SessionManager(trunkManager, repository, hub, notificationsRepo, debounce, chunkQueue, paperclipClient),
+    manager: new SessionManager(trunkManager, repository, hub, notificationsRepo, debounce, chunkQueue, paperclipClient, paraMemoryWriter),
     trunkManager,
     repository,
     hub,
@@ -269,7 +310,9 @@ function createFixture(overrides: Partial<FixtureOptions> = {}) {
     debounce,
     chunkQueue,
     turn,
+    turns,
     paperclipClient,
+    paraMemoryWriter,
   };
 }
 
@@ -316,6 +359,7 @@ function makeAgentState(participantId: string): AgentChannelState {
 interface FixtureOptions {
   session: ChatSession | null;
   turn: Turn;
+  turns: Turn[];
   participants: SessionParticipant[];
   agentStates: AgentChannelState[];
   connectedUsers: Set<string>;
