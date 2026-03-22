@@ -282,6 +282,15 @@ export class SessionManager {
     await this.notifyOnFirstAgentTurn(participants, session, turn, input);
 
     if (isDmSession) {
+      const dmAgents = participants
+        .filter(
+          (participant) =>
+            participant.participantType === "agent" && participant.participantId !== input.fromParticipantId,
+        )
+        .map((participant) => participant.participantId);
+      for (const agentId of dmAgents) {
+        this.debounce.enqueue(agentId, input.sessionId, turn);
+      }
       return turn;
     }
 

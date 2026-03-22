@@ -250,6 +250,10 @@ describe("SessionManager", () => {
   it("uses DM fold cadence instead of chunking for direct messages", async () => {
     const fixture = createFixture({
       channel: { id: "channel-1", type: "dm", companyId: "company-1", paperclipRefId: null, name: "Direct chat" },
+      participants: [
+        { participantId: "human-1", participantType: "human", companyId: "company-1" },
+        { participantId: "agent-1", participantType: "agent", companyId: "company-1" },
+      ],
       turn: {
         ...makeTurn(),
         seq: CHAT_DEFAULTS.W_DM,
@@ -266,7 +270,7 @@ describe("SessionManager", () => {
     });
 
     expect(fixture.chunkQueue.enqueue).toHaveBeenCalledWith("session-1", "dm");
-    expect(fixture.debounce.enqueue).not.toHaveBeenCalled();
+    expect(fixture.debounce.enqueue).toHaveBeenCalledWith("agent-1", "session-1", fixture.turn);
     expect(fixture.repository.incrementIdleTurnCount).not.toHaveBeenCalled();
   });
 
