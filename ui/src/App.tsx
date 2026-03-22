@@ -149,6 +149,7 @@ export function App() {
 
   const liveEntries = (messagesQuery.data?.turns ?? []).map(mapTurnToEntry);
   const sessionState = sessionStateQuery.data?.session ?? null;
+  const agentStates = sessionStateQuery.data?.agentStates ?? [];
   const sessionClosed = sessionState?.status === "closed";
   const previewEntries = buildThreadPreview(
     selectedChannel,
@@ -357,6 +358,32 @@ export function App() {
                     Session history hydrates from the backend when a live channel context is available.
                     The thread is now session-backed, realtime, and can be explicitly closed from the UI.
                   </p>
+                  {sessionState ? (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <span className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-medium text-stone-700">
+                        seq {sessionState.currentSeq}
+                      </span>
+                      <span className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-medium text-stone-700">
+                        window {sessionState.chunkWindowWTokens}w
+                      </span>
+                      <span className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-medium text-stone-700">
+                        verbatim {sessionState.verbatimKTokens}k
+                      </span>
+                    </div>
+                  ) : null}
+                  {agentStates.length > 0 ? (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {agentStates.map((state) => (
+                        <span
+                          key={state.id}
+                          className="inline-flex items-center gap-2 rounded-full border border-stone-200 bg-white px-3 py-1.5 text-xs font-medium text-stone-700"
+                        >
+                          <span className={["h-2 w-2 rounded-full", agentStateToneClass(state.status)].join(" ")} />
+                          {state.participantId.slice(0, 6)} {state.status} · idle {state.idleTurnCount}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
                   {Object.keys(presenceByAgent).length > 0 ? (
                     <div className="mt-3 flex flex-wrap gap-2">
                       {Object.entries(presenceByAgent).map(([agentId, presence]) => (
@@ -791,6 +818,17 @@ function presenceToneClass(status: string) {
       return "bg-stone-400";
     default:
       return "bg-amber-500";
+  }
+}
+
+function agentStateToneClass(status: AgentChannelState["status"]) {
+  switch (status) {
+    case "active":
+      return "bg-emerald-500";
+    case "observing":
+      return "bg-blue-500";
+    default:
+      return "bg-stone-400";
   }
 }
 
