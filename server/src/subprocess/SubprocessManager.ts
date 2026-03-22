@@ -115,7 +115,7 @@ export class SubprocessManager {
         await this.stateStore.saveAgentState({
           ...nextState,
           cliSessionId: cliResult.cliSessionId ?? request.cliSessionId ?? null,
-          cliSessionPath: cliResult.cliSessionPath ?? null,
+          cliSessionPath: cliResult.cliSessionPath ?? workspace.sessionPath ?? request.agentState.cliSessionPath ?? null,
           tokensThisSession: (cliResult.actualInputTokens ?? 0) + (cliResult.outputTokens ?? 0),
         });
       } catch (error) {
