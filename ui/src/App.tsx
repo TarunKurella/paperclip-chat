@@ -433,7 +433,13 @@ export function App() {
                 </article>
               ) : null}
               {previewEntries.map((entry) => (
-                <article key={entry.id} className="rounded-3xl border border-stone-200 bg-stone-50/70 px-4 py-4">
+                <article
+                  key={entry.id}
+                  className={[
+                    "rounded-3xl border px-4 py-4",
+                    entry.isDecision ? "border-amber-200 bg-amber-50/80" : "border-stone-200 bg-stone-50/70",
+                  ].join(" ")}
+                >
                   <div className="flex items-center justify-between gap-4">
                     <div className="flex items-center gap-3">
                       <div
@@ -444,6 +450,11 @@ export function App() {
                       />
                       <p className="text-sm font-semibold text-stone-900">{entry.author}</p>
                       <span className="text-xs uppercase tracking-[0.16em] text-stone-500">{entry.kind}</span>
+                      {entry.isDecision ? (
+                        <span className="rounded-full border border-amber-200 bg-white px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-amber-700">
+                          decision
+                        </span>
+                      ) : null}
                     </div>
                     <span className="text-xs text-stone-500">{entry.timestamp}</span>
                   </div>
@@ -473,6 +484,7 @@ export function App() {
                     kind: "human",
                     timestamp: "now",
                     body: nextDraft,
+                    isDecision: false,
                   };
 
                   setOptimisticMessages((current) => ({
@@ -635,6 +647,7 @@ function buildThreadPreview(channel: Channel | null, optimisticEntries: ThreadEn
       kind: "human",
       timestamp: "just now",
       body: `Opened ${channel.name} and prepared the chat surface for live session traffic.`,
+      isDecision: false,
     },
     {
       id: `${channel.id}-2`,
@@ -642,6 +655,7 @@ function buildThreadPreview(channel: Channel | null, optimisticEntries: ThreadEn
       kind: "agent",
       timestamp: "live",
       body: "Session routes, token counting, history pagination, and notifications are now wired. Composer send and realtime thread hydration are next.",
+      isDecision: false,
     },
     ...optimisticEntries,
   ];
@@ -675,6 +689,7 @@ interface ThreadEntry {
   kind: "human" | "agent";
   timestamp: string;
   body: string;
+  isDecision: boolean;
 }
 
 function renderNotificationTitle(notification: Notification) {
@@ -704,6 +719,7 @@ function mapTurnToEntry(turn: Turn): ThreadEntry {
     kind: turn.fromParticipantId.startsWith("agent") ? "agent" : "human",
     timestamp: new Date(turn.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
     body: turn.content,
+    isDecision: turn.isDecision,
   };
 }
 
