@@ -156,6 +156,7 @@ export async function bootstrapServer(envSource: NodeJS.ProcessEnv = process.env
   );
   dispatchCoordinator = new AgentDispatchCoordinator(
     sessionRepository,
+    resolvedContextStore,
     channelService,
     paperclipClient,
     subprocessManager,

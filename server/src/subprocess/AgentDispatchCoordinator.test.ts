@@ -47,14 +47,30 @@ describe("AgentDispatchCoordinator", () => {
 
     expect(fixture.subprocessManager.run).toHaveBeenCalledTimes(2);
   });
+
+  it("injects stored summaries and chunks for observing agents", async () => {
+    const fixture = createFixture({
+      channel: makeChannel({ type: "project", name: "Project Alpha", paperclipRefId: "project-1" }),
+      session: makeSession({ currentSeq: 12 }),
+      agentState: makeAgentState({ status: "observing", anchorSeq: 0 }),
+    });
+
+    await fixture.coordinator.flush("agent-1", "session-1", [makeTurn()]);
+
+    const prompt = fixture.subprocessManager.run.mock.calls[0]?.[0]?.prompt as string;
+    expect(prompt).toContain("[CHUNK 1-2]");
+    expect(prompt).toContain("Chunk summary");
+  });
 });
 
 function createFixture(overrides: {
   adapterType?: string;
   agentState?: AgentChannelState;
+  channel?: Channel;
+  session?: ChatSession;
 } = {}) {
-  const session = makeSession();
-  const channel = makeChannel();
+  const session = overrides.session ?? makeSession();
+  const channel = overrides.channel ?? makeChannel();
   const agentState = overrides.agentState ?? makeAgentState();
   const sessions = {
     getSession: vi.fn().mockResolvedValue(session as ChatSession),
@@ -67,6 +83,27 @@ function createFixture(overrides: {
   };
   const channels = {
     getChannel: vi.fn().mockResolvedValue(channel as Channel),
+  };
+  const context = {
+    listChunks: vi.fn().mockResolvedValue([
+      {
+        id: "chunk-1",
+        sessionId: "session-1",
+        chunkStart: 1,
+        chunkEnd: 2,
+        summary: "Chunk summary",
+        summaryTokenCount: 10,
+        inputTokenCount: 20,
+        dirty: false,
+      },
+    ]),
+    getSummary: vi.fn().mockResolvedValue({
+      sessionId: "session-1",
+      text: "Global summary",
+      tokenCount: 15,
+      chunkSeqCovered: 2,
+      updatedAt: new Date().toISOString(),
+    }),
   };
   const paperclipClient = {
     getAgent: vi.fn().mockResolvedValue({
@@ -86,6 +123,7 @@ function createFixture(overrides: {
   return {
     coordinator: new AgentDispatchCoordinator(
       sessions as never,
+      context as never,
       channels as never,
       paperclipClient as never,
       subprocessManager as never,
@@ -96,7 +134,7 @@ function createFixture(overrides: {
   };
 }
 
-function makeSession(): ChatSession {
+function makeSession(overrides: Partial<ChatSession> = {}): ChatSession {
   return {
     id: "session-1",
     channelId: "channel-1",
@@ -104,16 +142,18 @@ function makeSession(): ChatSession {
     chunkWindowWTokens: 1200,
     verbatimKTokens: 800,
     currentSeq: 3,
+    ...overrides,
   };
 }
 
-function makeChannel(): Channel {
+function makeChannel(overrides: Partial<Channel> = {}): Channel {
   return {
     id: "channel-1",
     type: "dm",
     companyId: "company-1",
     paperclipRefId: null,
     name: "Direct chat",
+    ...overrides,
   };
 }
 

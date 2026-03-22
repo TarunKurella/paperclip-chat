@@ -1,5 +1,6 @@
-import type { AgentChannelState, Channel, ChatSession, Turn } from "@paperclip-chat/shared";
-import { assemblePacket } from "../context/PacketAssembler.js";
+import type { Turn } from "@paperclip-chat/shared";
+import { assemblePacket, shouldUseDmShortcut } from "../context/PacketAssembler.js";
+import type { ContextStore } from "../context/store.js";
 import type { ChannelService } from "../channels/service.js";
 import type { PaperclipClient } from "../adapters/paperclipClient.js";
 import type { SessionRepository } from "../session/SessionManager.js";
@@ -16,6 +17,7 @@ export class AgentDispatchCoordinator {
 
   constructor(
     private readonly sessions: Pick<SessionRepository, "getSession" | "listSessionParticipants" | "listAgentStates" | "listTurns">,
+    private readonly context: Pick<ContextStore, "listChunks" | "getSummary">,
     private readonly channels: Pick<ChannelService, "getChannel">,
     private readonly paperclipClient: Pick<PaperclipClient, "getAgent">,
     private readonly subprocessManager: Pick<SubprocessManager, "run">,
@@ -47,8 +49,17 @@ export class AgentDispatchCoordinator {
 
     const participants = await this.sessions.listSessionParticipants(sessionId);
     const priorTurns = await this.sessions.listTurns(sessionId, { limit: 200 });
+    const globalSummary = await this.context.getSummary(sessionId);
     const triggeringTurn = toBatchedTrigger(turns);
     const senderName = turns.length === 1 ? turns[0]!.fromParticipantId : "Recent messages";
+    const useDmShortcut = shouldUseDmShortcut(channel.type, participants.length);
+    const chunks = useDmShortcut || agentState.status === "absent"
+      ? []
+      : (await this.context.listChunks(sessionId)).filter(
+          (chunk) =>
+            chunk.chunkStart > agentState.anchorSeq &&
+            chunk.chunkEnd < triggeringTurn.seq,
+        );
 
     const packet = assemblePacket({
       channelName: channel.name,
@@ -61,8 +72,8 @@ export class AgentDispatchCoordinator {
       currentSeq: Math.max(session.currentSeq, triggeringTurn.seq),
       triggeringTurn,
       turns: priorTurns,
-      chunks: [],
-      globalSummary: null,
+      chunks,
+      globalSummary,
     });
 
     const result = await this.subprocessManager.run({
