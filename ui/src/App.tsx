@@ -18,6 +18,7 @@ export function App() {
   const companyId = readCompanyId();
   const [selectedChannelId, setSelectedChannelId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  const [liveDecision, setLiveDecision] = useState<ThreadEntry | null>(null);
   const [presenceByAgent, setPresenceByAgent] = useState<Record<string, { status: string; updatedAt: string }>>({});
   const [optimisticMessages, setOptimisticMessages] = useState<Record<string, ThreadEntry[]>>({});
   const [sessionIdsByChannel, setSessionIdsByChannel] = useState<Record<string, string>>({});
@@ -195,6 +196,16 @@ export function App() {
           ...current,
           [selectedChannel.id]: (current[selectedChannel.id] ?? []).filter((entry) => entry.body !== turn.content),
         }));
+        return;
+      }
+
+      if (envelope.type === "session.decision") {
+        const turn = readTurnPayload(envelope.payload);
+        if (!turn || !selectedChannel || !selectedSessionId || activeChannelId !== selectedChannel.id) {
+          return;
+        }
+
+        setLiveDecision(mapTurnToEntry(turn));
         return;
       }
 
@@ -431,6 +442,24 @@ export function App() {
               {sessionClosed ? (
                 <article className="rounded-3xl border border-stone-200 bg-stone-100 px-4 py-4 text-sm text-stone-600">
                   This session has been closed. You can still review the transcript, but sending is disabled.
+                </article>
+              ) : null}
+              {liveDecision ? (
+                <article className="rounded-3xl border border-amber-200 bg-amber-50 px-4 py-4">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-3">
+                      <span className="h-2.5 w-2.5 rounded-full bg-amber-500" />
+                      <p className="text-sm font-semibold text-stone-900">Live decision</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setLiveDecision(null)}
+                      className="rounded-full border border-amber-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-amber-700"
+                    >
+                      dismiss
+                    </button>
+                  </div>
+                  <p className="mt-3 text-sm leading-7 text-stone-700">{liveDecision.body}</p>
                 </article>
               ) : null}
               {previewEntries.map((entry) => (
