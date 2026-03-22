@@ -87,6 +87,7 @@ export interface CloseSessionInput {
 export interface SessionDetails {
   session: ChatSession;
   agentStates: AgentChannelState[];
+  summary: SessionSummary | null;
 }
 
 export interface RecoveredSessionState {
@@ -158,7 +159,8 @@ export class SessionManager {
     }
 
     const agentStates = await this.repository.listAgentStates(sessionId);
-    return { session, agentStates };
+    const summary = await this.repository.getSessionSummary(sessionId);
+    return { session, agentStates, summary };
   }
 
   async listSessionParticipants(sessionId: string): Promise<SessionParticipant[]> {

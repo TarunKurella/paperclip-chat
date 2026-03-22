@@ -1,6 +1,6 @@
 import { useEffect, useState, startTransition } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { APP_NAME, CHAT_API_PATHS, type AgentChannelState, type Channel, type ChatSession, type Notification, type SessionParticipant, type Turn } from "@paperclip-chat/shared";
+import { APP_NAME, CHAT_API_PATHS, type AgentChannelState, type Channel, type ChatSession, type Notification, type SessionParticipant, type SessionSummary, type Turn } from "@paperclip-chat/shared";
 import { cn } from "./lib/utils.js";
 import { Routes, Route, Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 import { ChatThread, type AgentPresence, type ThreadEntry } from "./components/ChatThread.js";
@@ -44,6 +44,7 @@ function Shell() {
   const [newDmOpen, setNewDmOpen] = useState(false);
   const [newDmName, setNewDmName] = useState("");
   const [visibleEntryCount, setVisibleEntryCount] = useState(20);
+  const [crystallizedIssueId, setCrystallizedIssueId] = useState<string | null>(null);
   const healthQuery = useQuery({
     queryKey: ["health"],
     queryFn: async () => requestJson<{ status: string; paperclip: string; ws: string }>("/api/health"),
@@ -165,24 +166,26 @@ function Shell() {
     queryKey: ["session", selectedSessionId],
     enabled: Boolean(selectedSessionId),
     queryFn: async () =>
-      requestJson<{ session: ChatSession; agentStates: AgentChannelState[] }>(
+      requestJson<{ session: ChatSession; agentStates: AgentChannelState[]; summary: SessionSummary | null }>(
         CHAT_API_PATHS.SESSION(selectedSessionId!),
       ),
   });
   const closeSessionMutation = useMutation({
-    mutationFn: async (input: { sessionId: string }) =>
-      requestJson<{ session: ChatSession }>(CHAT_API_PATHS.SESSION_CLOSE(input.sessionId), {
+    mutationFn: async (input: { sessionId: string; crystallize?: boolean }) =>
+      requestJson<{ session: ChatSession; paperclipIssueId?: string }>(CHAT_API_PATHS.SESSION_CLOSE(input.sessionId), {
         method: "POST",
-        body: JSON.stringify({}),
+        body: JSON.stringify({ crystallize: input.crystallize ?? false }),
       }),
     onSuccess: (result, variables) => {
-      queryClient.setQueryData<{ session: ChatSession; agentStates: AgentChannelState[] }>(
+      queryClient.setQueryData<{ session: ChatSession; agentStates: AgentChannelState[]; summary: SessionSummary | null }>(
         ["session", variables.sessionId],
         (current) => ({
           session: result.session,
           agentStates: current?.agentStates ?? [],
+          summary: current?.summary ?? null,
         }),
       );
+      setCrystallizedIssueId(result.paperclipIssueId ?? null);
     },
   });
   const messagesQuery = useQuery({
@@ -216,11 +219,13 @@ function Shell() {
 
   useEffect(() => {
     setMobileSidebarOpen(false);
+    setCrystallizedIssueId(null);
   }, [location.pathname, location.search]);
 
   const liveEntries = (messagesQuery.data?.turns ?? []).map(mapTurnToEntry);
   const sessionState = sessionStateQuery.data?.session ?? null;
   const agentStates = sessionStateQuery.data?.agentStates ?? [];
+  const sessionSummary = sessionStateQuery.data?.summary ?? null;
   const tokenTurns = tokenUsageQuery.data?.turns ?? [];
   const totalTokenCount = tokenTurns.reduce((sum, turn) => sum + turn.tokenCount, 0);
   const sessionClosed = sessionState?.status === "closed";
@@ -322,6 +327,24 @@ function Shell() {
           return;
         }
 
+        if (envelope.type === "session.summary") {
+          const summary = readSessionSummaryPayload(envelope.payload);
+          if (!summary || !selectedSessionId || summary.sessionId !== selectedSessionId) {
+            return;
+          }
+
+          queryClient.setQueryData<{ session: ChatSession; agentStates: AgentChannelState[]; summary: SessionSummary | null }>(
+            ["session", selectedSessionId],
+            (current) => current
+              ? {
+                  ...current,
+                  summary,
+                }
+              : undefined,
+          );
+          return;
+        }
+
         if (envelope.type === "notification.new") {
           const notification = readNotificationPayload(envelope.payload);
           if (!notification) {
@@ -356,7 +379,7 @@ function Shell() {
             return;
           }
 
-          queryClient.setQueryData<{ session: ChatSession; agentStates: AgentChannelState[] }>(
+          queryClient.setQueryData<{ session: ChatSession; agentStates: AgentChannelState[]; summary: SessionSummary | null }>(
             ["session", selectedSessionId],
             (current) => current
               ? {
@@ -549,10 +572,20 @@ function Shell() {
               sessionClosed={sessionClosed}
               openingSession={!usingFallbackChannels && !selectedSessionId}
               liveDecision={liveDecision}
+              summaryText={sessionSummary?.text ?? null}
+              summaryTokenCount={sessionSummary?.tokenCount ?? null}
+              crystallizing={closeSessionMutation.isPending}
+              crystallizedIssueId={crystallizedIssueId}
               entries={previewEntries}
               visibleCount={visibleEntryCount}
               onShowMore={() => setVisibleEntryCount((current) => current + 20)}
               onDismissDecision={() => setLiveDecision(null)}
+              onCrystallize={() => {
+                if (!selectedSessionId) {
+                  return;
+                }
+                closeSessionMutation.mutate({ sessionId: selectedSessionId, crystallize: true });
+              }}
             />
 
             <div className="border-t border-stone-200 px-6 py-5">
@@ -1057,6 +1090,20 @@ function readSessionClosedPayload(value: unknown): string | null {
   }
 
   return value.sessionId;
+}
+
+function readSessionSummaryPayload(value: unknown): SessionSummary | null {
+  if (!isRecord(value) || typeof value.sessionId !== "string" || typeof value.text !== "string" || typeof value.tokenCount !== "number") {
+    return null;
+  }
+
+  return {
+    sessionId: value.sessionId,
+    text: value.text,
+    tokenCount: value.tokenCount,
+    chunkSeqCovered: typeof value.chunkSeqCovered === "number" ? value.chunkSeqCovered : 0,
+    updatedAt: typeof value.updatedAt === "string" ? value.updatedAt : new Date().toISOString(),
+  };
 }
 
 function readPresencePayload(value: unknown): { agentId: string; status: string; updatedAt: string } | null {

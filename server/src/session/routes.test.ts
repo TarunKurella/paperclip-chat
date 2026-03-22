@@ -142,7 +142,7 @@ describe("sessionRoutes", () => {
       openSession: vi.fn(),
       processTurn: vi.fn(),
       closeSession: vi.fn(),
-      getSessionState: vi.fn().mockResolvedValue({ session: { id: "session-1" }, agentStates: [] }),
+      getSessionState: vi.fn().mockResolvedValue({ session: { id: "session-1" }, agentStates: [], summary: null }),
       getTokenUsage: vi.fn(),
       listMessages: vi.fn(),
       listSessionParticipants: vi.fn(),
