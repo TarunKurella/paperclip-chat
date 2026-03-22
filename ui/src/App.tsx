@@ -140,6 +140,12 @@ export function App() {
         `${CHAT_API_PATHS.CHANNEL_MESSAGES(selectedChannel!.id)}?sessionId=${encodeURIComponent(selectedSessionId!)}`,
       ),
   });
+  const tokenUsageQuery = useQuery({
+    queryKey: ["tokens", selectedSessionId],
+    enabled: Boolean(selectedSessionId),
+    queryFn: async () =>
+      requestJson<{ turns: Turn[] }>(CHAT_API_PATHS.SESSION_TOKENS(selectedSessionId!)),
+  });
 
   useEffect(() => {
     if (!selectedChannel || usingFallbackChannels || sessionIdsByChannel[selectedChannel.id] || openSessionMutation.isPending) {
@@ -152,6 +158,8 @@ export function App() {
   const liveEntries = (messagesQuery.data?.turns ?? []).map(mapTurnToEntry);
   const sessionState = sessionStateQuery.data?.session ?? null;
   const agentStates = sessionStateQuery.data?.agentStates ?? [];
+  const tokenTurns = tokenUsageQuery.data?.turns ?? [];
+  const totalTokenCount = tokenTurns.reduce((sum, turn) => sum + turn.tokenCount, 0);
   const sessionClosed = sessionState?.status === "closed";
   const previewEntries = buildThreadPreview(
     selectedChannel,
@@ -593,6 +601,16 @@ export function App() {
                   <h2 className="text-lg font-semibold">Unread Queue</h2>
                 </div>
               </div>
+              {selectedSessionId ? (
+                <div className="mt-3 flex flex-wrap gap-2 text-xs font-medium text-stone-600">
+                  <span className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1.5">
+                    total {totalTokenCount} tok
+                  </span>
+                  <span className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1.5">
+                    turns {tokenTurns.length}
+                  </span>
+                </div>
+              ) : null}
               {unauthenticatedNotifications ? (
                 <div className="mt-3 flex items-start gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800">
                   <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
@@ -601,6 +619,38 @@ export function App() {
               ) : null}
             </div>
             <div className="space-y-3 px-4 py-4">
+              {selectedSessionId ? (
+                <section className="rounded-2xl border border-stone-200 bg-stone-50 px-4 py-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-stone-900">Session telemetry</p>
+                      <p className="mt-1 text-xs uppercase tracking-[0.16em] text-stone-500">token usage</p>
+                    </div>
+                    <span className="text-xs text-stone-500">{totalTokenCount} tok</span>
+                  </div>
+                  <div className="mt-3 space-y-2">
+                    {tokenTurns.slice(-5).reverse().map((turn) => (
+                      <div
+                        key={turn.id}
+                        className="flex items-center justify-between gap-3 rounded-2xl border border-stone-200 bg-white px-3 py-2"
+                      >
+                        <div className="min-w-0">
+                          <p className="truncate text-xs font-medium text-stone-900">
+                            {turn.fromParticipantId.slice(0, 8)} · seq {turn.seq}
+                          </p>
+                          <p className="truncate text-xs text-stone-500">
+                            {new Date(turn.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                          </p>
+                        </div>
+                        <span className="shrink-0 text-xs font-medium text-stone-700">{turn.tokenCount} tok</span>
+                      </div>
+                    ))}
+                    {tokenTurns.length === 0 ? (
+                      <p className="text-sm text-stone-500">No tokenized turns yet.</p>
+                    ) : null}
+                  </div>
+                </section>
+              ) : null}
               {!unauthenticatedNotifications && notifications.length > 0 ? (
                 <div className="flex justify-end">
                   <button
