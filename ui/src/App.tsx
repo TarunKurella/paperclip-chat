@@ -9,6 +9,7 @@ import { MessageInput, type MentionCandidate } from "./components/MessageInput.j
 import { NotificationPanel } from "./components/NotificationPanel.js";
 import { Sidebar } from "./components/Sidebar.js";
 import { StatusPill } from "./components/StatusPill.js";
+import { useChatWebSocket } from "./hooks/useChatWebSocket.js";
 import { PanelLeft, PanelRight, Lock, MessageSquareText, Sparkles, X } from "lucide-react";
 
 export function App() {
@@ -283,206 +284,155 @@ function Shell() {
     }
   }, [messagesQuery.data?.turns?.length]);
 
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    let socket: WebSocket | null = null;
-    let reconnectTimer: number | null = null;
-    let disposed = false;
-    let attempts = 0;
-    let activeChannelId: string | null = null;
-
-    const connect = () => {
-      if (disposed) {
+  useChatWebSocket({
+    channelId: selectedChannel?.id ?? null,
+    sessionId: selectedSessionId,
+    getLastSeq: () =>
+      selectedChannel?.id
+        ? queryClient.getQueryData<{ turns: Turn[] }>(["messages", selectedChannel.id, selectedSessionId])?.turns.at(-1)?.seq ?? 0
+        : 0,
+    onMessage: (data) => {
+      const envelope = parseWsEnvelope(data);
+      if (!envelope) {
         return;
       }
 
-      socket = new WebSocket(buildChatWsUrl(window.location));
-
-      socket.addEventListener("open", () => {
-        attempts = 0;
-        if (selectedChannel?.id) {
-          activeChannelId = selectedChannel.id;
-          const lastSeq =
-            queryClient
-              .getQueryData<{ turns: Turn[] }>(["messages", selectedChannel.id, selectedSessionId])
-              ?.turns.at(-1)?.seq ?? 0;
-          socket?.send(
-            JSON.stringify({
-              type: "subscribe",
-              channelId: selectedChannel.id,
-              sessionId: selectedSessionId,
-              lastSeq,
-            }),
-          );
-        }
-      });
-
-      socket.addEventListener("message", (event) => {
-        const envelope = parseWsEnvelope(event.data);
-        if (!envelope) {
+      if (envelope.type === "chat.message") {
+        const turn = readTurnPayload(envelope.payload);
+        if (!turn || !selectedChannel || !selectedSessionId) {
           return;
         }
 
-        if (envelope.type === "chat.message") {
-          const turn = readTurnPayload(envelope.payload);
-          if (!turn || !selectedChannel || !selectedSessionId || activeChannelId !== selectedChannel.id) {
-            return;
-          }
-
-          queryClient.setQueryData<{ turns: Turn[] }>(
-            ["messages", selectedChannel.id, selectedSessionId],
-            (current) => ({
-              turns: dedupeTurns([...(current?.turns ?? []), turn]),
-            }),
-          );
-          setOptimisticMessages((current) => ({
-            ...current,
-            [selectedChannel.id]: (current[selectedChannel.id] ?? []).filter((entry) => entry.body !== turn.content),
-          }));
-          return;
-        }
-
-        if (envelope.type === "session.decision") {
-          const turn = readTurnPayload(envelope.payload);
-          if (!turn || !selectedChannel || !selectedSessionId || activeChannelId !== selectedChannel.id) {
-            return;
-          }
-
-          setLiveDecision(mapTurnToEntry(turn));
-          return;
-        }
-
-        if (envelope.type === "session.summary") {
-          const summary = readSessionSummaryPayload(envelope.payload);
-          if (!summary || !selectedSessionId || summary.sessionId !== selectedSessionId) {
-            return;
-          }
-
-          queryClient.setQueryData<{ session: ChatSession; agentStates: AgentChannelState[]; summary: SessionSummary | null }>(
-            ["session", selectedSessionId],
-            (current) => current
-              ? {
-                  ...current,
-                  summary,
-                }
-              : undefined,
-          );
-          return;
-        }
-
-        if (envelope.type === "chat.message.stream") {
-          const stream = readStreamPayload(envelope.payload);
-          if (!stream || !selectedChannel || !selectedSessionId || activeChannelId !== selectedChannel.id) {
-            return;
-          }
-
-          if (stream.done) {
-            setStreamingEntry(null);
-            setTypingAgents((current) => current.filter((agent) => agent !== stream.participantId));
-            return;
-          }
-
-          setTypingAgents((current) => current.includes(stream.participantId) ? current : [...current, stream.participantId]);
-          setStreamingEntry((current) => ({
-            id: current?.id ?? `stream-${stream.participantId}`,
-            author: `Agent ${stream.participantId.slice(0, 6)}`,
-            kind: "agent",
-            timestamp: "live",
-            body: `${current?.body ?? ""}${stream.delta}`,
-            isDecision: false,
-          }));
-          return;
-        }
-
-        if (envelope.type === "agent.typing") {
-          const typing = readTypingPayload(envelope.payload);
-          if (!typing || !selectedChannel || activeChannelId !== selectedChannel.id) {
-            return;
-          }
-
-          setTypingAgents((current) =>
-            typing.active
-              ? current.includes(typing.participantId)
-                ? current
-                : [...current, typing.participantId]
-              : current.filter((agent) => agent !== typing.participantId),
-          );
-          return;
-        }
-
-        if (envelope.type === "notification.new") {
-          const notification = readNotificationPayload(envelope.payload);
-          if (!notification) {
-            return;
-          }
-
-          queryClient.setQueryData<{ notifications: Notification[] }>(["notifications"], (current) => ({
-            notifications: dedupeNotifications([notification, ...(current?.notifications ?? [])]),
-          }));
-          return;
-        }
-
-        if (envelope.type === "agent.status") {
-          const presence = readPresencePayload(envelope.payload);
-          if (!presence) {
-            return;
-          }
-
-          setPresenceByAgent((current) => ({
-            ...current,
-            [presence.agentId]: {
-              status: presence.status,
-              updatedAt: presence.updatedAt,
-            },
-          }));
-          return;
-        }
-
-        if (envelope.type === "session.closed") {
-          const closedSessionId = readSessionClosedPayload(envelope.payload);
-          if (!closedSessionId || !selectedSessionId || closedSessionId !== selectedSessionId) {
-            return;
-          }
-
-          queryClient.setQueryData<{ session: ChatSession; agentStates: AgentChannelState[]; summary: SessionSummary | null }>(
-            ["session", selectedSessionId],
-            (current) => current
-              ? {
-                  ...current,
-                  session: {
-                    ...current.session,
-                    status: "closed",
-                  },
-                }
-              : undefined,
-          );
-        }
-      });
-
-      socket.addEventListener("close", () => {
-        if (disposed) {
-          return;
-        }
-
-        const nextDelay = Math.min(5_000, 500 * 2 ** attempts);
-        attempts += 1;
-        reconnectTimer = window.setTimeout(connect, nextDelay);
-      });
-    };
-
-    connect();
-
-    return () => {
-      disposed = true;
-      if (reconnectTimer !== null) {
-        window.clearTimeout(reconnectTimer);
+        queryClient.setQueryData<{ turns: Turn[] }>(
+          ["messages", selectedChannel.id, selectedSessionId],
+          (current) => ({
+            turns: dedupeTurns([...(current?.turns ?? []), turn]),
+          }),
+        );
+        setOptimisticMessages((current) => ({
+          ...current,
+          [selectedChannel.id]: (current[selectedChannel.id] ?? []).filter((entry) => entry.body !== turn.content),
+        }));
+        return;
       }
-      socket?.close();
-    };
-  }, [queryClient, selectedChannel, selectedSessionId]);
+
+      if (envelope.type === "session.decision") {
+        const turn = readTurnPayload(envelope.payload);
+        if (!turn || !selectedChannel || !selectedSessionId) {
+          return;
+        }
+
+        setLiveDecision(mapTurnToEntry(turn));
+        return;
+      }
+
+      if (envelope.type === "session.summary") {
+        const summary = readSessionSummaryPayload(envelope.payload);
+        if (!summary || !selectedSessionId || summary.sessionId !== selectedSessionId) {
+          return;
+        }
+
+        queryClient.setQueryData<{ session: ChatSession; agentStates: AgentChannelState[]; summary: SessionSummary | null }>(
+          ["session", selectedSessionId],
+          (current) => current
+            ? {
+                ...current,
+                summary,
+              }
+            : undefined,
+        );
+        return;
+      }
+
+      if (envelope.type === "chat.message.stream") {
+        const stream = readStreamPayload(envelope.payload);
+        if (!stream || !selectedChannel || !selectedSessionId) {
+          return;
+        }
+
+        if (stream.done) {
+          setStreamingEntry(null);
+          setTypingAgents((current) => current.filter((agent) => agent !== stream.participantId));
+          return;
+        }
+
+        setTypingAgents((current) => current.includes(stream.participantId) ? current : [...current, stream.participantId]);
+        setStreamingEntry((current) => ({
+          id: current?.id ?? `stream-${stream.participantId}`,
+          author: `Agent ${stream.participantId.slice(0, 6)}`,
+          kind: "agent",
+          timestamp: "live",
+          body: `${current?.body ?? ""}${stream.delta}`,
+          isDecision: false,
+        }));
+        return;
+      }
+
+      if (envelope.type === "agent.typing") {
+        const typing = readTypingPayload(envelope.payload);
+        if (!typing || !selectedChannel) {
+          return;
+        }
+
+        setTypingAgents((current) =>
+          typing.active
+            ? current.includes(typing.participantId)
+              ? current
+              : [...current, typing.participantId]
+            : current.filter((agent) => agent !== typing.participantId),
+        );
+        return;
+      }
+
+      if (envelope.type === "notification.new") {
+        const notification = readNotificationPayload(envelope.payload);
+        if (!notification) {
+          return;
+        }
+
+        queryClient.setQueryData<{ notifications: Notification[] }>(["notifications"], (current) => ({
+          notifications: dedupeNotifications([notification, ...(current?.notifications ?? [])]),
+        }));
+        return;
+      }
+
+      if (envelope.type === "agent.status") {
+        const presence = readPresencePayload(envelope.payload);
+        if (!presence) {
+          return;
+        }
+
+        setPresenceByAgent((current) => ({
+          ...current,
+          [presence.agentId]: {
+            status: presence.status,
+            updatedAt: presence.updatedAt,
+          },
+        }));
+        return;
+      }
+
+      if (envelope.type === "session.closed") {
+        const closedSessionId = readSessionClosedPayload(envelope.payload);
+        if (!closedSessionId || !selectedSessionId || closedSessionId !== selectedSessionId) {
+          return;
+        }
+
+        queryClient.setQueryData<{ session: ChatSession; agentStates: AgentChannelState[]; summary: SessionSummary | null }>(
+          ["session", selectedSessionId],
+          (current) => current
+            ? {
+                ...current,
+                session: {
+                  ...current.session,
+                  status: "closed",
+                },
+              }
+            : undefined,
+        );
+      }
+    },
+  });
 
   if (!selectedChannel && channels.length > 0 && location.pathname !== "/notifications") {
     return <Navigate to={`/channels/${channels[0]!.id}${location.search}`} replace />;
@@ -971,12 +921,6 @@ function readCompanyId() {
 
   const params = new URLSearchParams(window.location.search);
   return params.get("companyId");
-}
-
-function buildChatWsUrl(location: Location) {
-  const url = new URL("/ws", location.href);
-  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-  return url.toString();
 }
 
 function parseWsEnvelope(value: unknown): { type: string; payload: unknown } | null {
