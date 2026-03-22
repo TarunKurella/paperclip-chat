@@ -14,7 +14,7 @@ describe("SubprocessManager", () => {
       presence,
       vi.fn().mockResolvedValue({ cwd: "/tmp/workspace", sessionPath: "/tmp/session" }),
       runner,
-      { saveAgentState: vi.fn() },
+      { saveAgentState: vi.fn(), listTurns: vi.fn().mockResolvedValue([]) },
       { broadcast: vi.fn() },
       { CHAT_TOKEN_SECRET: "secret", CHAT_API_URL: "http://127.0.0.1:4011" },
     );
@@ -39,11 +39,12 @@ describe("SubprocessManager", () => {
     });
     const stateStore = { saveAgentState: vi.fn().mockResolvedValue(undefined) };
     const hub = { broadcast: vi.fn() };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }));
     const manager = new SubprocessManager(
       presence,
       vi.fn().mockResolvedValue({ cwd: "/tmp/workspace", sessionPath: "/tmp/session" }),
       runner,
-      stateStore,
+      { ...stateStore, listTurns: vi.fn().mockResolvedValue([]) },
       hub,
       { CHAT_TOKEN_SECRET: "secret", CHAT_API_URL: "http://127.0.0.1:4011" },
     );
@@ -84,6 +85,7 @@ describe("SubprocessManager", () => {
       type: "agent.typing",
       payload: { participantId: "agent-1", active: false },
     });
+    vi.unstubAllGlobals();
   });
 
   it("serializes concurrent spawns per agent", async () => {
@@ -115,7 +117,7 @@ describe("SubprocessManager", () => {
       presence,
       vi.fn().mockResolvedValue({ cwd: "/tmp/workspace", sessionPath: "/tmp/session" }),
       runner,
-      { saveAgentState: vi.fn().mockResolvedValue(undefined) },
+      { saveAgentState: vi.fn().mockResolvedValue(undefined), listTurns: vi.fn().mockResolvedValue([]) },
       { broadcast: vi.fn() },
       { CHAT_TOKEN_SECRET: "secret", CHAT_API_URL: "http://127.0.0.1:4011" },
     );
@@ -140,7 +142,7 @@ describe("SubprocessManager", () => {
       presence,
       vi.fn().mockResolvedValue({ cwd: "/tmp/workspace", sessionPath: "/tmp/session" }),
       vi.fn().mockRejectedValue(new Error("spawn failed")),
-      { saveAgentState: vi.fn() },
+      { saveAgentState: vi.fn(), listTurns: vi.fn().mockResolvedValue([]) },
       hub,
       { CHAT_TOKEN_SECRET: "secret", CHAT_API_URL: "http://127.0.0.1:4011" },
     );
@@ -152,6 +154,45 @@ describe("SubprocessManager", () => {
       payload: { agentId: "agent-1", message: "spawn failed" },
     });
     expect(presence.getPresence("agent-1")).toBe("available");
+  });
+
+  it("posts a fallback agent turn when the local cli returns text without sending back to chat", async () => {
+    const queue = { flush: vi.fn() };
+    const presence = new PresenceStateMachine(queue);
+    presence.updateFromPaperclip("agent-1", "idle");
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const manager = new SubprocessManager(
+      presence,
+      vi.fn().mockResolvedValue({ cwd: "/tmp/workspace", sessionPath: "/tmp/session" }),
+      vi.fn().mockResolvedValue({
+        stream: [{ type: "delta", delta: "fallback hello" }],
+        actualInputTokens: 1,
+        outputTokens: 2,
+      }),
+      {
+        saveAgentState: vi.fn().mockResolvedValue(undefined),
+        listTurns: vi.fn().mockResolvedValue([]),
+      },
+      { broadcast: vi.fn() },
+      { CHAT_TOKEN_SECRET: "secret", CHAT_API_URL: "http://127.0.0.1:4011" },
+    );
+
+    await manager.run(makeRequest());
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:4011/api/sessions/session-1/send",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          Authorization: expect.stringContaining("Bearer "),
+          "Content-Type": "application/json",
+        }),
+        body: JSON.stringify({ text: "fallback hello", mentionedIds: [] }),
+      }),
+    );
+    vi.unstubAllGlobals();
   });
 });
 

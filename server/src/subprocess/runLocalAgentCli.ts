@@ -1,15 +1,31 @@
 import { spawn } from "node:child_process";
+import { mkdir, mkdtemp, readlink, rm, symlink } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { RunCliInput, SubprocessRunResult } from "./SubprocessManager.js";
+import { INLINE_CHAT_PROTOCOL } from "../skills/protocol.js";
+
+const runtimeDir = path.dirname(fileURLToPath(import.meta.url));
+const chatSkillDir = path.resolve(runtimeDir, "../skills/paperclip-chat");
+const chatPromptPrefix = [
+  INLINE_CHAT_PROTOCOL,
+  "You are in an active paperclip-chat session.",
+  "Reply by sending your response through the chat API using the paperclip-chat skill.",
+  "Do not only print a final answer to stdout.",
+].join("\n");
 
 export async function runLocalAgentCli(input: RunCliInput, envSource: NodeJS.ProcessEnv = process.env): Promise<SubprocessRunResult> {
   const command = resolveCommand(input.adapterType, envSource);
+  const runtime = await prepareRuntime(input);
 
   return new Promise<SubprocessRunResult>((resolve, reject) => {
-    const child = spawn(command, input.args, {
+    const child = spawn(command, runtime.args, {
       cwd: input.cwd,
       env: {
         ...process.env,
         ...input.env,
+        ...runtime.env,
       },
       shell: false,
       stdio: "pipe",
@@ -24,8 +40,11 @@ export async function runLocalAgentCli(input: RunCliInput, envSource: NodeJS.Pro
     child.stderr.on("data", (chunk) => {
       stderr += chunk.toString("utf8");
     });
-    child.on("error", reject);
+    child.on("error", (error) => {
+      void cleanupRuntime(runtime).finally(() => reject(error));
+    });
     child.on("close", (code) => {
+      void cleanupRuntime(runtime);
       if ((code ?? 0) !== 0) {
         const message = stderr.trim() || stdout.trim() || `${command} exited with code ${code ?? -1}`;
         reject(new Error(message));
@@ -45,9 +64,98 @@ export async function runLocalAgentCli(input: RunCliInput, envSource: NodeJS.Pro
       });
     });
 
-    child.stdin.write(input.stdin);
+    child.stdin.write(runtime.stdin);
     child.stdin.end();
   });
+}
+
+async function prepareRuntime(input: RunCliInput): Promise<{
+  args: string[];
+  env: Record<string, string>;
+  stdin: string;
+  cleanupDir?: string;
+}> {
+  if (!isChatSessionEnv(input.env)) {
+    return { args: input.args, env: {}, stdin: input.stdin };
+  }
+
+  if (input.adapterType === "codex_local") {
+    await ensureCodexChatSkill(input.cwd);
+    return {
+      args: ensureCodexChatArgs(input.args),
+      env: {},
+      stdin: `${chatPromptPrefix}\n\n${input.stdin}`,
+    };
+  }
+
+  const skillsRoot = await createClaudeChatSkillsDir();
+  return {
+    args: ensureClaudeChatArgs(input.args, skillsRoot),
+    env: {},
+    stdin: `${chatPromptPrefix}\n\n${input.stdin}`,
+    cleanupDir: skillsRoot,
+  };
+}
+
+async function cleanupRuntime(runtime: { cleanupDir?: string }) {
+  if (!runtime.cleanupDir) {
+    return;
+  }
+
+  await rm(runtime.cleanupDir, { recursive: true, force: true }).catch(() => {});
+}
+
+function isChatSessionEnv(env: Record<string, string>): boolean {
+  return [env.CHAT_API_URL, env.CHAT_API_TOKEN, env.CHAT_SESSION_ID].every(
+    (value) => typeof value === "string" && value.trim().length > 0,
+  );
+}
+
+async function ensureCodexChatSkill(cwd: string): Promise<void> {
+  const skillsDir = path.join(cwd, ".agents", "skills");
+  const target = path.join(skillsDir, "paperclip-chat");
+  await mkdir(skillsDir, { recursive: true });
+  const linked = await readlink(target).catch(() => null);
+  if (linked) {
+    const resolved = path.resolve(path.dirname(target), linked);
+    if (resolved === chatSkillDir) {
+      return;
+    }
+  }
+  await rm(target, { recursive: true, force: true }).catch(() => {});
+  await symlink(chatSkillDir, target);
+}
+
+async function createClaudeChatSkillsDir(): Promise<string> {
+  const root = await mkdtemp(path.join(os.tmpdir(), "paperclip-chat-claude-"));
+  const skillsDir = path.join(root, ".claude", "skills");
+  await mkdir(skillsDir, { recursive: true });
+  await symlink(chatSkillDir, path.join(skillsDir, "paperclip-chat"));
+  return root;
+}
+
+function ensureCodexChatArgs(args: string[]): string[] {
+  const next = [...args];
+  if (!next.includes("--dangerously-bypass-approvals-and-sandbox")) {
+    const insertAfterJson = next.findIndex((value) => value === "--json");
+    if (insertAfterJson >= 0) {
+      next.splice(insertAfterJson + 1, 0, "--dangerously-bypass-approvals-and-sandbox");
+    } else {
+      next.push("--dangerously-bypass-approvals-and-sandbox");
+    }
+  }
+  return next;
+}
+
+function ensureClaudeChatArgs(args: string[], skillsRoot: string): string[] {
+  const next = [...args];
+  if (!next.includes("--dangerously-skip-permissions")) {
+    next.push("--dangerously-skip-permissions");
+  }
+  if (!next.includes("--add-dir")) {
+    next.push("--add-dir", skillsRoot);
+  }
+  return next;
 }
 
 function resolveCommand(adapterType: string, envSource: NodeJS.ProcessEnv): string {

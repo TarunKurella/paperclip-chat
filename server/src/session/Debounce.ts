@@ -54,7 +54,9 @@ export class DebounceBuffer<TTurn extends DebouncedTurn> {
 
   private createTimer(key: string): ReturnType<typeof setTimeout> {
     return setTimeout(() => {
-      void this.flushKey(key);
+      void this.flushKey(key).catch((error) => {
+        console.error("Debounce flush failed", error);
+      });
     }, this.delayMs);
   }
 

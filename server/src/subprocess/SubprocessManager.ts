@@ -27,6 +27,7 @@ export interface RunCliInput {
 
 export interface RunStateStore {
   saveAgentState(state: AgentChannelState): Promise<void>;
+  listTurns(sessionId: string, options?: { limit?: number }): Promise<Turn[]>;
 }
 
 export interface StreamHub {
@@ -103,6 +104,27 @@ export class SubprocessManager {
           stdin: request.prompt,
         });
 
+        const fallbackText = (cliResult.stream ?? [])
+          .filter((event) => event.type === "delta")
+          .map((event) => event.delta)
+          .join("")
+          .trim();
+
+        if (fallbackText) {
+          const recentTurns = await this.stateStore.listTurns(request.sessionId, { limit: 10 });
+          const hasAgentReply = recentTurns.some(
+            (turn) => turn.fromParticipantId === request.agentId && turn.seq > request.triggeringTurn.seq,
+          );
+          if (!hasAgentReply) {
+            await postFallbackTurn(
+              this.env.CHAT_API_URL ?? this.env.PAPERCLIP_API_URL ?? "",
+              request.sessionId,
+              token,
+              fallbackText,
+            );
+          }
+        }
+
         for (const event of cliResult.stream ?? []) {
           this.hub.broadcast(request.channelId, {
             type: CHAT_EVENT_TYPES.CHAT_MESSAGE_STREAM,
@@ -150,6 +172,26 @@ export class SubprocessManager {
 
     await runPromise;
     return { status: "completed" };
+  }
+}
+
+async function postFallbackTurn(chatApiUrl: string, sessionId: string, token: string, text: string): Promise<void> {
+  if (!chatApiUrl.trim() || !text.trim()) {
+    return;
+  }
+
+  const response = await fetch(`${chatApiUrl.replace(/\/$/, "")}/api/sessions/${sessionId}/send`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ text, mentionedIds: [] }),
+  });
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(body || `Fallback chat send failed with ${response.status}`);
   }
 }
 

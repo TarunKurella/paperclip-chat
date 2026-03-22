@@ -1,3 +1,4 @@
+import { access } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { Channel } from "@paperclip-chat/shared";
@@ -14,7 +15,7 @@ export async function resolveChatWorkspace(
   sessionId: string,
   paperclipClient: Pick<PaperclipClient, "getProjectWorkspace" | "getIssue">,
 ): Promise<WorkspaceResolution> {
-  const agentHome = path.join(os.homedir(), ".paperclip", "agents", agentId, "workspace");
+  const agentHome = await resolveAgentWorkspace(agentId);
   const sessionPath = path.join(os.homedir(), ".claude", "chat-sessions", sessionId);
 
   let cwd = agentHome;
@@ -49,6 +50,31 @@ export async function resolveChatWorkspace(
     cwd,
     sessionPath,
   };
+}
+
+async function resolveAgentWorkspace(agentId: string): Promise<string> {
+  const currentPaperclipWorkspace = path.join(
+    os.homedir(),
+    ".paperclip",
+    "instances",
+    "default",
+    "workspaces",
+    agentId,
+  );
+  if (await pathExists(currentPaperclipWorkspace)) {
+    return currentPaperclipWorkspace;
+  }
+
+  return path.join(os.homedir(), ".paperclip", "agents", agentId, "workspace");
+}
+
+async function pathExists(target: string): Promise<boolean> {
+  try {
+    await access(target);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function assertChatSessionIsolation(sessionPath: string): void {

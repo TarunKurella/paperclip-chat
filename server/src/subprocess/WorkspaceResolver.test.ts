@@ -25,6 +25,20 @@ describe("resolveChatWorkspace", () => {
     expect(result.sessionPath).toBe(path.join(os.homedir(), ".claude", "chat-sessions", "session-1"));
   });
 
+  it("prefers the Paperclip-managed workspace layout when it exists", async () => {
+    const agentId = "8c180a4d-a7ac-4a0f-8739-c572b3f60215";
+    const result = await resolveChatWorkspace(
+      baseChannel,
+      agentId,
+      "session-1",
+      mockPaperclipClient(),
+    );
+
+    expect(result.cwd).toBe(
+      path.join(os.homedir(), ".paperclip", "instances", "default", "workspaces", agentId),
+    );
+  });
+
   it("uses project workspace when available", async () => {
     const result = await resolveChatWorkspace(
       { ...baseChannel, type: "project", paperclipRefId: "project-1" },
