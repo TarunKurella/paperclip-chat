@@ -10,6 +10,8 @@ export interface SessionRouteAuth {
 
 export interface SessionRouteHooks {
   onSessionOpened?: (session: Awaited<ReturnType<SessionManager["openSession"]>>) => Promise<void> | void;
+  onTurnProcessed?: (sessionId: string) => Promise<void> | void;
+  onSessionClosed?: (sessionId: string) => Promise<void> | void;
 }
 
 export interface AgentRateLimiter {
@@ -70,6 +72,7 @@ export function sessionRoutes(
         content: text,
         mentionedIds,
       });
+      await hooks.onTurnProcessed?.(sessionId);
       res.json({ turn });
     },
   );
@@ -82,6 +85,7 @@ export function sessionRoutes(
       const sessionId = readParam(req.params.id);
       const { crystallize } = closeSessionSchema.parse(req.body ?? {});
       const result = await sessionManager.closeSession({ sessionId, crystallize });
+      await hooks.onSessionClosed?.(sessionId);
       res.json(result);
     },
   );

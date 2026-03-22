@@ -17,6 +17,7 @@ import { createServerDatabase } from "./db/client.js";
 import { notificationRoutes } from "./notifications/routes.js";
 import { skillRoutes } from "./skills/routes.js";
 import { DebounceBuffer } from "./session/Debounce.js";
+import { IdleSessionCoordinator } from "./session/IdleSessionCoordinator.js";
 import { InMemorySessionRepository } from "./session/memoryRepository.js";
 import { DbSessionRepository } from "./session/repository.js";
 import { SessionManager, type NotificationRepository, type SessionRepository } from "./session/SessionManager.js";
@@ -130,10 +131,15 @@ export async function bootstrapServer(envSource: NodeJS.ProcessEnv = process.env
     { enqueue: async () => {} },
     paperclipClient,
   );
+  const idleSessionCoordinator = new IdleSessionCoordinator(
+    sessionManager,
+    Number(envSource.CHAT_IDLE_TIMEOUT_MS ?? 10 * 60 * 1000),
+  );
   hub.setReplayProvider((sessionId, lastSeq) => sessionManager.listMessages(sessionId, lastSeq));
   const recoveredSessions = await sessionManager.recoverActiveSessions();
   await Promise.all(
     recoveredSessions.map(async ({ session }) => {
+      idleSessionCoordinator.track(session.id);
       const channel = await channelService.getChannel(session.channelId);
       if (!channel) {
         return;
@@ -168,6 +174,7 @@ export async function bootstrapServer(envSource: NodeJS.ProcessEnv = process.env
       requireAny: requireAnyMiddleware,
     }, {
       onSessionOpened: async (session) => {
+        idleSessionCoordinator.track(session.id);
         const channel = await channelService.getChannel(session.channelId);
         if (!channel) {
           return;
@@ -179,6 +186,12 @@ export async function bootstrapServer(envSource: NodeJS.ProcessEnv = process.env
             .filter((participant) => participant.participantType === "agent")
             .map((participant) => wakeupManager.ensureSessionScaffold(session, channel, participant.participantId)),
         );
+      },
+      onTurnProcessed: async (sessionId) => {
+        idleSessionCoordinator.touch(sessionId);
+      },
+      onSessionClosed: async (sessionId) => {
+        idleSessionCoordinator.untrack(sessionId);
       },
     }),
   );
@@ -198,6 +211,7 @@ export async function bootstrapServer(envSource: NodeJS.ProcessEnv = process.env
 
   const close = async () => {
     debounce.close();
+    idleSessionCoordinator.close();
     hub.close();
     wsSubscriptions.forEach((subscription) => subscription.stop());
     stopServiceAccountLifecycle(lifecycle);
