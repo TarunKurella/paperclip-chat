@@ -37,6 +37,8 @@ function Shell() {
   const [draft, setDraft] = useState("");
   const [liveDecision, setLiveDecision] = useState<ThreadEntry | null>(null);
   const [presenceByAgent, setPresenceByAgent] = useState<Record<string, { status: string; updatedAt: string }>>({});
+  const [streamingEntry, setStreamingEntry] = useState<ThreadEntry | null>(null);
+  const [typingAgents, setTypingAgents] = useState<string[]>([]);
   const [optimisticMessages, setOptimisticMessages] = useState<Record<string, ThreadEntry[]>>({});
   const [sessionIdsByChannel, setSessionIdsByChannel] = useState<Record<string, string>>({});
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -220,6 +222,8 @@ function Shell() {
   useEffect(() => {
     setMobileSidebarOpen(false);
     setCrystallizedIssueId(null);
+    setStreamingEntry(null);
+    setTypingAgents([]);
   }, [location.pathname, location.search]);
 
   const liveEntries = (messagesQuery.data?.turns ?? []).map(mapTurnToEntry);
@@ -253,6 +257,8 @@ function Shell() {
 
   useEffect(() => {
     setVisibleEntryCount(20);
+    setStreamingEntry(null);
+    setTypingAgents([]);
   }, [selectedChannelId, selectedSessionId]);
 
   useEffect(() => {
@@ -341,6 +347,46 @@ function Shell() {
                   summary,
                 }
               : undefined,
+          );
+          return;
+        }
+
+        if (envelope.type === "chat.message.stream") {
+          const stream = readStreamPayload(envelope.payload);
+          if (!stream || !selectedChannel || !selectedSessionId || activeChannelId !== selectedChannel.id) {
+            return;
+          }
+
+          if (stream.done) {
+            setStreamingEntry(null);
+            setTypingAgents((current) => current.filter((agent) => agent !== stream.participantId));
+            return;
+          }
+
+          setTypingAgents((current) => current.includes(stream.participantId) ? current : [...current, stream.participantId]);
+          setStreamingEntry((current) => ({
+            id: current?.id ?? `stream-${stream.participantId}`,
+            author: `Agent ${stream.participantId.slice(0, 6)}`,
+            kind: "agent",
+            timestamp: "live",
+            body: `${current?.body ?? ""}${stream.delta}`,
+            isDecision: false,
+          }));
+          return;
+        }
+
+        if (envelope.type === "agent.typing") {
+          const typing = readTypingPayload(envelope.payload);
+          if (!typing || !selectedChannel || activeChannelId !== selectedChannel.id) {
+            return;
+          }
+
+          setTypingAgents((current) =>
+            typing.active
+              ? current.includes(typing.participantId)
+                ? current
+                : [...current, typing.participantId]
+              : current.filter((agent) => agent !== typing.participantId),
           );
           return;
         }
@@ -576,6 +622,8 @@ function Shell() {
               summaryTokenCount={sessionSummary?.tokenCount ?? null}
               crystallizing={closeSessionMutation.isPending}
               crystallizedIssueId={crystallizedIssueId}
+              streamingEntry={streamingEntry}
+              typingAgents={typingAgents}
               entries={previewEntries}
               visibleCount={visibleEntryCount}
               onShowMore={() => setVisibleEntryCount((current) => current + 20)}
@@ -1103,6 +1151,29 @@ function readSessionSummaryPayload(value: unknown): SessionSummary | null {
     tokenCount: value.tokenCount,
     chunkSeqCovered: typeof value.chunkSeqCovered === "number" ? value.chunkSeqCovered : 0,
     updatedAt: typeof value.updatedAt === "string" ? value.updatedAt : new Date().toISOString(),
+  };
+}
+
+function readStreamPayload(value: unknown): { participantId: string; delta: string; done: boolean } | null {
+  if (!isRecord(value) || typeof value.participantId !== "string" || typeof value.delta !== "string" || typeof value.done !== "boolean") {
+    return null;
+  }
+
+  return {
+    participantId: value.participantId,
+    delta: value.delta,
+    done: value.done,
+  };
+}
+
+function readTypingPayload(value: unknown): { participantId: string; active: boolean } | null {
+  if (!isRecord(value) || typeof value.participantId !== "string" || typeof value.active !== "boolean") {
+    return null;
+  }
+
+  return {
+    participantId: value.participantId,
+    active: value.active,
   };
 }
 

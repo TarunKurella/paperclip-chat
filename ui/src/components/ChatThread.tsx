@@ -1,4 +1,5 @@
 import type { AgentChannelState, ChatSession } from "@paperclip-chat/shared";
+import ReactMarkdown from "react-markdown";
 import { cn } from "../lib/utils.js";
 
 export interface ThreadEntry {
@@ -28,6 +29,8 @@ export function ChatThread(props: {
   summaryTokenCount: number | null;
   crystallizing: boolean;
   crystallizedIssueId: string | null;
+  streamingEntry: ThreadEntry | null;
+  typingAgents: string[];
   entries: ThreadEntry[];
   visibleCount: number;
   onShowMore(): void;
@@ -107,34 +110,16 @@ export function ChatThread(props: {
         </div>
       ) : null}
       {visibleEntries.map((entry) => (
-        <article
-          key={entry.id}
-          className={cn(
-            "border-b border-stone-200 px-1 py-4 last:border-b-0",
-            entry.isDecision ? "bg-amber-50/70" : "bg-transparent",
-          )}
-        >
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div
-                className={cn(
-                  "h-2.5 w-2.5 rounded-full",
-                  entry.kind === "agent" ? "bg-green-500" : "bg-gray-400",
-                )}
-              />
-              <p className="text-[13px] font-semibold text-stone-900">{entry.author}</p>
-              <span className="text-[11px] uppercase tracking-[0.16em] text-stone-500">{entry.kind}</span>
-              {entry.isDecision ? (
-                <span className="rounded-sm border border-amber-200 bg-white px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-amber-700">
-                  decision
-                </span>
-              ) : null}
-            </div>
-            <span className="text-xs text-stone-500">{entry.timestamp}</span>
-          </div>
-          <div className="mt-3 whitespace-pre-wrap text-[15px] leading-7 text-stone-700">{entry.body}</div>
-        </article>
+        <ThreadRow key={entry.id} entry={entry} />
       ))}
+      {props.streamingEntry ? (
+        <ThreadRow entry={props.streamingEntry} streaming />
+      ) : null}
+      {props.typingAgents.length > 0 ? (
+        <div className="border-b border-stone-200 px-1 py-4 text-sm text-stone-500">
+          {props.typingAgents.join(", ")} {props.typingAgents.length === 1 ? "is" : "are"} typing…
+        </div>
+      ) : null}
       {props.agentStates.length > 0 || Object.keys(props.presenceByAgent).length > 0 ? (
         <section className="rounded-md border border-stone-200 bg-white px-4 py-4">
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-stone-500">Realtime activity</p>
@@ -172,6 +157,46 @@ export function ChatThread(props: {
         </section>
       ) : null}
     </div>
+  );
+}
+
+function ThreadRow(props: { entry: ThreadEntry; streaming?: boolean }) {
+  const { entry } = props;
+
+  return (
+    <article
+      className={cn(
+        "border-b border-stone-200 px-1 py-4 last:border-b-0",
+        entry.isDecision ? "bg-amber-50/70" : "bg-transparent",
+      )}
+    >
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div
+            className={cn(
+              "h-2.5 w-2.5 rounded-full",
+              entry.kind === "agent" ? "bg-green-500" : "bg-gray-400",
+            )}
+          />
+          <p className="text-[13px] font-semibold text-stone-900">{entry.author}</p>
+          <span className="text-[11px] uppercase tracking-[0.16em] text-stone-500">{entry.kind}</span>
+          {entry.isDecision ? (
+            <span className="rounded-sm border border-amber-200 bg-white px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-amber-700">
+              decision
+            </span>
+          ) : null}
+          {props.streaming ? (
+            <span className="rounded-sm border border-stone-200 bg-stone-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-stone-500">
+              streaming
+            </span>
+          ) : null}
+        </div>
+        <span className="text-xs text-stone-500">{entry.timestamp}</span>
+      </div>
+      <div className="prose prose-stone mt-3 max-w-none text-[15px] leading-7">
+        <ReactMarkdown>{`${entry.body}${props.streaming ? "▍" : ""}`}</ReactMarkdown>
+      </div>
+    </article>
   );
 }
 
