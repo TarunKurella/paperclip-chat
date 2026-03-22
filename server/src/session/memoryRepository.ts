@@ -103,6 +103,14 @@ export class InMemorySessionRepository implements SessionRepository, TrunkStore 
     );
   }
 
+  async saveAgentState(state: AgentChannelState): Promise<void> {
+    const states = this.agentStates.get(state.sessionId) ?? [];
+    this.agentStates.set(
+      state.sessionId,
+      states.map((current) => (current.participantId === state.participantId ? { ...state } : current)),
+    );
+  }
+
   async saveScaffoldIssue(sessionId: string, participantId: string, scaffoldIssueId: string): Promise<void> {
     const states = this.agentStates.get(sessionId) ?? [];
     this.agentStates.set(

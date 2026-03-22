@@ -21,6 +21,11 @@ import { InMemorySessionRepository } from "./session/memoryRepository.js";
 import { DbSessionRepository } from "./session/repository.js";
 import { SessionManager, type NotificationRepository, type SessionRepository } from "./session/SessionManager.js";
 import { sessionRoutes } from "./session/routes.js";
+import { AgentDispatchCoordinator } from "./subprocess/AgentDispatchCoordinator.js";
+import { PresenceStateMachine } from "./subprocess/PresenceStateMachine.js";
+import { resolveChatWorkspace } from "./subprocess/WorkspaceResolver.js";
+import { runLocalAgentCli } from "./subprocess/runLocalAgentCli.js";
+import { SubprocessManager } from "./subprocess/SubprocessManager.js";
 import { WakeupScaffoldManager } from "./wakeup/WakeupScaffoldManager.js";
 import { ChatWsHub } from "./ws/hub.js";
 
@@ -67,6 +72,7 @@ export async function bootstrapServer(envSource: NodeJS.ProcessEnv = process.env
       companyId: company.id,
       serviceKey: lifecycle.serviceAccount?.liveEventsToken ?? env.chatServiceKey,
       onAgentStatus: (event) => {
+        presence.updateFromPaperclip(event.agentId, event.status);
         hub.broadcastToCompany(company.id, {
           type: CHAT_EVENT_TYPES.AGENT_STATUS,
           payload: event,
@@ -91,23 +97,29 @@ export async function bootstrapServer(envSource: NodeJS.ProcessEnv = process.env
   const hub = new ChatWsHub(paperclipClient, envSource);
   hub.attach(server);
   const wakeupManager = new WakeupScaffoldManager(paperclipClient, sessionRepository);
+  let dispatchCoordinator: AgentDispatchCoordinator | null = null;
+  const presence = new PresenceStateMachine({
+    flush: (agentId) => {
+      void dispatchCoordinator?.flushPending(agentId);
+    },
+  });
+  const subprocessManager = new SubprocessManager(
+    presence,
+    (channel, agentId, sessionId) => resolveChatWorkspace(channel, agentId, sessionId, paperclipClient),
+    (input) => runLocalAgentCli(input, envSource),
+    sessionRepository,
+    hub,
+    envSource,
+  );
+  dispatchCoordinator = new AgentDispatchCoordinator(
+    sessionRepository,
+    channelService,
+    paperclipClient,
+    subprocessManager,
+    wakeupManager,
+  );
   const debounce = new DebounceBuffer<Turn>(async (agentId, sessionId, turns) => {
-    const session = await sessionRepository.getSession(sessionId);
-    if (!session) {
-      return;
-    }
-
-    const channel = await channelService.getChannel(session.channelId);
-    if (!channel) {
-      return;
-    }
-
-    await wakeupManager.flushMentionBatch({
-      agentId,
-      sessionId,
-      channel,
-      turns,
-    });
+    await dispatchCoordinator?.flush(agentId, sessionId, turns);
   });
   const sessionManager = new SessionManager(
     new TrunkManager(trunkStore),
@@ -130,6 +142,12 @@ export async function bootstrapServer(envSource: NodeJS.ProcessEnv = process.env
       await wakeupManager.recoverSessionScaffolds(session, channel);
     }),
   );
+  wsSubscriptions.forEach((subscription) => {
+    const snapshot = subscription.presence.snapshot();
+    for (const [agentId, record] of Object.entries(snapshot)) {
+      presence.updateFromPaperclip(agentId, record.status);
+    }
+  });
 
   app.get("/api/health", (_req, res) => {
     res.json({ status: "ok", paperclip: "connected", ws: "running" });

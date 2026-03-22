@@ -168,6 +168,26 @@ export class DbSessionRepository implements SessionRepository, NotificationRepos
     );
   }
 
+  async saveAgentState(state: AgentChannelState): Promise<void> {
+    await this.db
+      .update(agentChannelStates)
+      .set({
+        status: state.status,
+        anchorSeq: state.anchorSeq,
+        scaffoldIssueId: state.scaffoldIssueId,
+        cliSessionId: state.cliSessionId,
+        cliSessionPath: state.cliSessionPath,
+        idleTurnCount: state.idleTurnCount,
+        tokensThisSession: state.tokensThisSession,
+      })
+      .where(
+        and(
+          eq(agentChannelStates.sessionId, state.sessionId),
+          eq(agentChannelStates.participantId, state.participantId),
+        ),
+      );
+  }
+
   async saveRunState(input: {
     sessionId: string;
     participantId: string;

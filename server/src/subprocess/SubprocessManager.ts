@@ -1,7 +1,8 @@
-import { CHAT_EVENT_TYPES, type Channel, type Turn } from "@paperclip-chat/shared";
+import { CHAT_EVENT_TYPES, type AgentChannelState, type Channel, type Turn } from "@paperclip-chat/shared";
 import { signChatToken } from "../auth/chatTokens.js";
 import type { WorkspaceResolution } from "./WorkspaceResolver.js";
 import type { PresenceStateMachine } from "./PresenceStateMachine.js";
+import { transitionOnCompletion } from "../context/AgentChannelState.js";
 
 export interface SubprocessStreamEvent {
   type: "delta";
@@ -17,20 +18,15 @@ export interface SubprocessRunResult {
 }
 
 export interface RunCliInput {
+  adapterType: string;
   cwd: string;
   args: string[];
   env: Record<string, string>;
+  stdin: string;
 }
 
 export interface RunStateStore {
-  saveRunState(input: {
-    sessionId: string;
-    participantId: string;
-    cliSessionId: string | null;
-    cliSessionPath: string | null;
-    anchorSeq: number;
-    tokensThisSession: number;
-  }): Promise<void>;
+  saveAgentState(state: AgentChannelState): Promise<void>;
 }
 
 export interface StreamHub {
@@ -38,6 +34,7 @@ export interface StreamHub {
 }
 
 export interface SpawnRequest {
+  adapterType: string;
   agentId: string;
   sessionId: string;
   channel: Channel;
@@ -45,6 +42,7 @@ export interface SpawnRequest {
   prompt: string;
   currentSeq: number;
   triggeringTurn: Turn;
+  agentState: AgentChannelState;
   cliSessionId?: string | null;
 }
 
@@ -88,8 +86,9 @@ export class SubprocessManager {
           this.env,
         );
         const cliResult = await this.runCli({
+          adapterType: request.adapterType,
           cwd: workspace.cwd,
-          args: buildArgs(request.prompt, request.cliSessionId),
+          args: buildArgs(request.adapterType, request.cliSessionId),
           env: {
             CHAT_API_URL: this.env.CHAT_API_URL ?? this.env.PAPERCLIP_API_URL ?? "",
             CHAT_SESSION_ID: request.sessionId,
@@ -97,6 +96,7 @@ export class SubprocessManager {
             PAPERCLIP_WAKE_REASON: "chat_message",
             PAPERCLIP_WAKE_COMMENT_ID: request.triggeringTurn.id,
           },
+          stdin: request.prompt,
         });
 
         for (const event of cliResult.stream ?? []) {
@@ -111,12 +111,11 @@ export class SubprocessManager {
           payload: { delta: "", done: true, participantId: request.agentId },
         });
 
-        await this.stateStore.saveRunState({
-          sessionId: request.sessionId,
-          participantId: request.agentId,
+        const nextState = transitionOnCompletion(request.agentState, request.currentSeq);
+        await this.stateStore.saveAgentState({
+          ...nextState,
           cliSessionId: cliResult.cliSessionId ?? request.cliSessionId ?? null,
           cliSessionPath: cliResult.cliSessionPath ?? null,
-          anchorSeq: request.currentSeq,
           tokensThisSession: (cliResult.actualInputTokens ?? 0) + (cliResult.outputTokens ?? 0),
         });
       } catch (error) {
@@ -146,12 +145,19 @@ export class SubprocessManager {
   }
 }
 
-function buildArgs(prompt: string, cliSessionId?: string | null): string[] {
+function buildArgs(adapterType: string, cliSessionId?: string | null): string[] {
+  if (adapterType === "codex_local") {
+    return cliSessionId
+      ? ["exec", "--json", "resume", cliSessionId, "-"]
+      : ["exec", "--json", "-"];
+  }
+
   return [
-    ...(cliSessionId ? ["--resume", cliSessionId] : []),
     "--print",
-    prompt,
+    "-",
     "--output-format",
     "stream-json",
+    "--verbose",
+    ...(cliSessionId ? ["--resume", cliSessionId] : []),
   ];
 }

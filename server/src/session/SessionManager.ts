@@ -3,6 +3,7 @@ import path from "node:path";
 import { CHAT_DEFAULTS, CHAT_EVENT_TYPES, type AgentChannelState, type ChatSession, type Notification, type Turn } from "@paperclip-chat/shared";
 import type { TrunkManager } from "../context/TrunkManager.js";
 import type { PaperclipClient } from "../adapters/paperclipClient.js";
+import { transitionOnMention } from "../context/AgentChannelState.js";
 
 export interface NotificationRecord {
   id?: string;
@@ -32,6 +33,7 @@ export interface SessionRepository {
   listAgentStates(sessionId: string): Promise<AgentChannelState[]>;
   createAgentStates(sessionId: string, participantIds: string[]): Promise<void>;
   incrementIdleTurnCount(sessionId: string, participantIds: string[]): Promise<void>;
+  saveAgentState(state: AgentChannelState): Promise<void>;
   saveScaffoldIssue(sessionId: string, participantId: string, scaffoldIssueId: string): Promise<void>;
   saveRunState(input: {
     sessionId: string;
@@ -262,6 +264,10 @@ export class SessionManager {
     for (const state of agentStates) {
       if (!mentionedAgents.has(state.participantId)) {
         continue;
+      }
+      const nextState = transitionOnMention(state, turn.seq);
+      if (nextState.status !== state.status || nextState.anchorSeq !== state.anchorSeq || nextState.idleTurnCount !== state.idleTurnCount) {
+        await this.repository.saveAgentState(nextState);
       }
       this.debounce.enqueue(state.participantId, input.sessionId, turn);
     }

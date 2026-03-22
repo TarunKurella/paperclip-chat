@@ -297,6 +297,7 @@ function createFixture(overrides: Partial<FixtureOptions> = {}) {
     listAgentStates: vi.fn().mockResolvedValue(agentStates),
     createAgentStates: vi.fn().mockResolvedValue(undefined),
     incrementIdleTurnCount: vi.fn().mockResolvedValue(undefined),
+    saveAgentState: vi.fn().mockResolvedValue(undefined),
     saveScaffoldIssue: vi.fn().mockResolvedValue(undefined),
     saveRunState: vi.fn().mockResolvedValue(undefined),
   };
