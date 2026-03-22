@@ -2,9 +2,13 @@ import { useEffect, useState, startTransition } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { APP_NAME, CHAT_API_PATHS, type AgentChannelState, type Channel, type ChatSession, type Notification, type Turn } from "@paperclip-chat/shared";
 import { cn } from "./lib/utils.js";
+import { Routes, Route, Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
+import { Sidebar } from "./components/Sidebar.js";
+import { StatusPill } from "./components/StatusPill.js";
 import {
   BellRing,
-  ChevronRight,
+  PanelLeft,
+  PanelRight,
   Lock,
   MessageSquareText,
   Radio,
@@ -14,14 +18,30 @@ import {
 } from "lucide-react";
 
 export function App() {
+  return (
+    <Routes>
+      <Route path="/" element={<Shell />} />
+      <Route path="/channels/:channelId" element={<Shell />} />
+      <Route path="/notifications" element={<Shell />} />
+    </Routes>
+  );
+}
+
+function Shell() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const params = useParams();
   const companyId = readCompanyId();
-  const [selectedChannelId, setSelectedChannelId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [liveDecision, setLiveDecision] = useState<ThreadEntry | null>(null);
   const [presenceByAgent, setPresenceByAgent] = useState<Record<string, { status: string; updatedAt: string }>>({});
   const [optimisticMessages, setOptimisticMessages] = useState<Record<string, ThreadEntry[]>>({});
   const [sessionIdsByChannel, setSessionIdsByChannel] = useState<Record<string, string>>({});
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [mobileActivityOpen, setMobileActivityOpen] = useState(false);
+  const [newDmOpen, setNewDmOpen] = useState(false);
+  const [newDmName, setNewDmName] = useState("");
   const healthQuery = useQuery({
     queryKey: ["health"],
     queryFn: async () => requestJson<{ status: string; paperclip: string; ws: string }>("/api/health"),
@@ -61,12 +81,13 @@ export function App() {
   });
 
   const channels = channelsQuery.data ?? demoChannels;
+  const selectedChannelId = params.channelId ?? null;
   const selectedChannel =
     channels.find((channel) => channel.id === selectedChannelId) ??
-    channels[0] ??
     null;
   const selectedSessionId = selectedChannel ? sessionIdsByChannel[selectedChannel.id] ?? null : null;
   const notifications = notificationsQuery.data?.notifications ?? demoNotifications;
+  const notificationsRoute = location.pathname === "/notifications";
   const usingFallbackChannels = !companyId || channelsQuery.isError || channels.length === 0;
   const unauthenticatedNotifications = notificationsQuery.isError;
   const draftLength = draft.length;
@@ -93,6 +114,28 @@ export function App() {
         ...current,
         [channel.id]: result.session.id,
       }));
+    },
+  });
+  const createDmMutation = useMutation({
+    mutationFn: async (input: { companyId: string; name: string }) =>
+      requestJson<Channel>(CHAT_API_PATHS.CHANNELS, {
+        method: "POST",
+        body: JSON.stringify({
+          type: "dm",
+          companyId: input.companyId,
+          name: input.name,
+        }),
+      }),
+    onSuccess: (channel) => {
+      queryClient.setQueryData<Channel[]>(["channels", companyId], (current) => {
+        const existing = current ?? [];
+        return existing.some((entry) => entry.id === channel.id) ? existing : [...existing, channel];
+      });
+      setNewDmOpen(false);
+      setNewDmName("");
+      startTransition(() => {
+        navigate(`/channels/${channel.id}${location.search}`);
+      });
     },
   });
   const sendMessageMutation = useMutation({
@@ -164,6 +207,10 @@ export function App() {
     openSessionMutation.mutate(selectedChannel);
   }, [openSessionMutation, selectedChannel, sessionIdsByChannel, usingFallbackChannels]);
 
+  useEffect(() => {
+    setMobileSidebarOpen(false);
+  }, [location.pathname, location.search]);
+
   const liveEntries = (messagesQuery.data?.turns ?? []).map(mapTurnToEntry);
   const sessionState = sessionStateQuery.data?.session ?? null;
   const agentStates = sessionStateQuery.data?.agentStates ?? [];
@@ -175,6 +222,24 @@ export function App() {
     optimisticMessages[selectedChannel?.id ?? ""] ?? [],
     liveEntries,
   );
+  const previewsByChannel = Object.fromEntries(
+    channels.map((channel) => {
+      const preview = channel.id === selectedChannel?.id
+        ? previewEntries.at(-1)
+        : undefined;
+      return [
+        channel.id,
+        {
+          body: preview?.body ?? "",
+          timestamp: preview?.timestamp ?? "",
+        },
+      ];
+    }),
+  );
+
+  if (!selectedChannel && channels.length > 0 && location.pathname !== "/notifications") {
+    return <Navigate to={`/channels/${channels[0]!.id}${location.search}`} replace />;
+  }
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -296,22 +361,28 @@ export function App() {
                 <h1 className="text-2xl font-semibold tracking-tight">{APP_NAME}</h1>
               </div>
             </div>
+            <div className="flex items-center gap-2 lg:hidden">
+              <button
+                type="button"
+                onClick={() => setMobileSidebarOpen(true)}
+                className="inline-flex items-center gap-2 rounded-full border border-stone-200 bg-stone-50 px-3 py-2 text-sm font-medium text-stone-700"
+              >
+                <PanelLeft className="h-4 w-4" />
+                Channels
+              </button>
+              <button
+                type="button"
+                onClick={() => setMobileActivityOpen(true)}
+                className="inline-flex items-center gap-2 rounded-full border border-stone-200 bg-stone-50 px-3 py-2 text-sm font-medium text-stone-700"
+              >
+                <PanelRight className="h-4 w-4" />
+                Activity
+              </button>
+            </div>
             <div className="flex flex-wrap items-center gap-3 text-sm text-stone-600">
-              <StatusPill
-                label="Server"
-                value={healthQuery.data?.status ?? "loading"}
-                tone={healthQuery.data?.status === "ok" ? "green" : "amber"}
-              />
-              <StatusPill
-                label="Paperclip"
-                value={healthQuery.data?.paperclip ?? "pending"}
-                tone={healthQuery.data?.paperclip === "connected" ? "green" : "amber"}
-              />
-              <StatusPill
-                label="Realtime"
-                value={healthQuery.data?.ws ?? "pending"}
-                tone={healthQuery.data?.ws === "running" ? "green" : "amber"}
-              />
+              <StatusPill label="Server" value={healthQuery.data?.status ?? "loading"} tone={healthQuery.data?.status === "ok" ? "green" : "amber"} />
+              <StatusPill label="Paperclip" value={healthQuery.data?.paperclip ?? "pending"} tone={healthQuery.data?.paperclip === "connected" ? "green" : "amber"} />
+              <StatusPill label="Realtime" value={healthQuery.data?.ws ?? "pending"} tone={healthQuery.data?.ws === "running" ? "green" : "amber"} />
               <div className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-medium text-stone-600">
                 {companyId ? `companyId ${companyId.slice(0, 8)}…` : "Add ?companyId=<uuid> for live channels"}
               </div>
@@ -320,75 +391,24 @@ export function App() {
         </header>
 
         <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[320px_minmax(0,1fr)_320px]">
-          <aside className="rounded-[28px] border border-stone-200 bg-white shadow-[0_1px_0_rgba(0,0,0,0.04)]">
-            <div className="border-b border-stone-200 px-5 py-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">
-                    Channels
-                  </p>
-                  <h2 className="mt-1 text-lg font-semibold">Conversation Surface</h2>
-                </div>
-                <span className="rounded-full bg-stone-100 px-2.5 py-1 text-xs font-medium text-stone-600">
-                  {channels.length}
-                </span>
-              </div>
-              {usingFallbackChannels ? (
-                <p className="mt-3 text-sm leading-6 text-stone-500">
-                  Showing local preview channels until a live company context is available.
-                </p>
-              ) : null}
-            </div>
-            <div className="space-y-1 px-3 py-3">
-              {channels.map((channel) => {
-                const selected = channel.id === selectedChannel?.id;
-                const unreadCount = unreadCountByChannel[channel.id] ?? 0;
-                const hasSession = Boolean(sessionIdsByChannel[channel.id]);
-                return (
-                  <button
-                    key={channel.id}
-                    type="button"
-                    onClick={() =>
-                      startTransition(() => {
-                        setSelectedChannelId(channel.id);
-                      })
-                    }
-                    className={cn(
-                      "flex w-full items-start gap-3 rounded-2xl px-3 py-3 text-left transition",
-                      selected ? "bg-stone-100" : "hover:bg-stone-50",
-                    )}
-                  >
-                    <div className={cn("mt-1 h-2.5 w-2.5 rounded-full", unreadCount > 0 ? "bg-blue-500" : hasSession ? "bg-green-500" : "bg-gray-400")} />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="flex min-w-0 items-center gap-2">
-                          <p className={cn("truncate text-sm text-stone-900", unreadCount > 0 ? "font-semibold" : "font-medium")}>
-                            {channel.name}
-                          </p>
-                          {hasSession ? (
-                            <span className="rounded-full border border-stone-200 bg-white px-2 py-0.5 text-[11px] font-medium uppercase tracking-[0.14em] text-stone-500">
-                              live
-                            </span>
-                          ) : null}
-                        </div>
-                        <div className="flex items-center gap-2">
-                          {unreadCount > 0 ? (
-                            <span className="rounded-full bg-blue-500 px-2 py-0.5 text-[11px] font-semibold text-white">
-                              {unreadCount}
-                            </span>
-                          ) : null}
-                          <ChevronRight className="h-4 w-4 shrink-0 text-stone-400" />
-                        </div>
-                      </div>
-                      <p className="mt-1 text-xs uppercase tracking-[0.16em] text-stone-500">
-                        {channel.type.replace("_", " ")}
-                      </p>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </aside>
+          <div className="hidden lg:block">
+            <Sidebar
+              channels={channels}
+              selectedChannelId={selectedChannelId}
+              unreadCountByChannel={unreadCountByChannel}
+              sessionIdsByChannel={sessionIdsByChannel}
+              notifications={notifications}
+              previewsByChannel={previewsByChannel}
+              usingFallbackChannels={usingFallbackChannels}
+              canCreateDm={Boolean(companyId) && !usingFallbackChannels}
+              onSelectChannel={(channelId) =>
+                startTransition(() => {
+                  navigate(`/channels/${channelId}${location.search}`);
+                })
+              }
+              onCreateDm={() => setNewDmOpen(true)}
+            />
+          </div>
 
           <section className="flex min-h-[640px] flex-col rounded-[28px] border border-stone-200 bg-white shadow-[0_1px_0_rgba(0,0,0,0.04)]">
             <div className="border-b border-stone-200 px-6 py-5">
@@ -615,7 +635,7 @@ export function App() {
             </div>
           </section>
 
-          <aside className="rounded-[28px] border border-stone-200 bg-white shadow-[0_1px_0_rgba(0,0,0,0.04)]">
+          <aside className="hidden rounded-[28px] border border-stone-200 bg-white shadow-[0_1px_0_rgba(0,0,0,0.04)] lg:block">
             <div className="border-b border-stone-200 px-5 py-4">
               <div className="flex items-center gap-3">
                 <div className="rounded-2xl bg-amber-50 p-2 text-amber-600">
@@ -705,7 +725,19 @@ export function App() {
                     {renderNotificationBody(notification)}
                   </p>
                   {!unauthenticatedNotifications ? (
-                    <div className="mt-3 flex justify-end">
+                    <div className="mt-3 flex justify-between gap-3">
+                      {typeof notification.payload.channelId === "string" ? (
+                        <button
+                          type="button"
+                          onClick={() => navigate(`/channels/${notification.payload.channelId}${location.search}`)}
+                          className={cn(
+                            "rounded-full border px-3 py-1.5 text-xs font-medium transition",
+                            notificationsRoute ? "border-amber-200 bg-amber-50 text-amber-700" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-100",
+                          )}
+                        >
+                          Open channel
+                        </button>
+                      ) : <span />}
                       <button
                         type="button"
                         onClick={() => markNotificationsReadMutation.mutate([notification.id])}
@@ -722,19 +754,160 @@ export function App() {
           </aside>
         </div>
       </div>
+      {mobileSidebarOpen ? (
+        <div className="fixed inset-0 z-40 bg-black/30 px-4 py-4 lg:hidden">
+          <div className="flex h-full max-w-sm flex-col">
+            <div className="mb-3 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setMobileSidebarOpen(false)}
+                className="inline-flex items-center gap-2 rounded-full border border-stone-200 bg-white px-3 py-2 text-sm font-medium text-stone-700"
+              >
+                <X className="h-4 w-4" />
+                Close
+              </button>
+            </div>
+            <Sidebar
+              channels={channels}
+              selectedChannelId={selectedChannelId}
+              unreadCountByChannel={unreadCountByChannel}
+              sessionIdsByChannel={sessionIdsByChannel}
+              notifications={notifications}
+              previewsByChannel={previewsByChannel}
+              usingFallbackChannels={usingFallbackChannels}
+              canCreateDm={Boolean(companyId) && !usingFallbackChannels}
+              onSelectChannel={(channelId) =>
+                startTransition(() => {
+                  navigate(`/channels/${channelId}${location.search}`);
+                })
+              }
+              onCreateDm={() => {
+                setMobileSidebarOpen(false);
+                setNewDmOpen(true);
+              }}
+            />
+          </div>
+        </div>
+      ) : null}
+      {mobileActivityOpen ? (
+        <div className="fixed inset-0 z-40 bg-black/30 px-4 py-4 lg:hidden">
+          <div className="ml-auto flex h-full max-w-sm flex-col">
+            <div className="mb-3 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setMobileActivityOpen(false)}
+                className="inline-flex items-center gap-2 rounded-full border border-stone-200 bg-white px-3 py-2 text-sm font-medium text-stone-700"
+              >
+                <X className="h-4 w-4" />
+                Close
+              </button>
+            </div>
+            <aside className="flex-1 overflow-y-auto rounded-[28px] border border-stone-200 bg-white shadow-[0_1px_0_rgba(0,0,0,0.04)]">
+              <div className="border-b border-stone-200 px-5 py-4">
+                <div className="flex items-center gap-3">
+                  <div className="rounded-2xl bg-amber-50 p-2 text-amber-600">
+                    <BellRing className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">
+                      Notifications
+                    </p>
+                    <h2 className="text-lg font-semibold">Unread Queue</h2>
+                  </div>
+                </div>
+              </div>
+              <div className="space-y-3 px-4 py-4">
+                {notifications.slice(0, 6).map((notification) => (
+                  <article key={`mobile-${notification.id}`} className="rounded-2xl border border-stone-200 bg-stone-50 px-4 py-4">
+                    <p className="text-sm font-semibold text-stone-900">{renderNotificationTitle(notification)}</p>
+                    <p className="mt-2 text-sm leading-6 text-stone-600">{renderNotificationBody(notification)}</p>
+                    {typeof notification.payload.channelId === "string" ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMobileActivityOpen(false);
+                          navigate(`/channels/${notification.payload.channelId}${location.search}`);
+                        }}
+                        className="mt-3 rounded-full border border-stone-200 bg-white px-3 py-1.5 text-xs font-medium text-stone-700"
+                      >
+                        Open channel
+                      </button>
+                    ) : null}
+                  </article>
+                ))}
+              </div>
+            </aside>
+          </div>
+        </div>
+      ) : null}
+      {newDmOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 px-4">
+          <div className="w-full max-w-md rounded-[28px] border border-stone-200 bg-white p-6 shadow-[0_12px_40px_rgba(0,0,0,0.12)]">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">Direct Message</p>
+                <h2 className="mt-1 text-xl font-semibold text-stone-900">Create DM channel</h2>
+                <p className="mt-2 text-sm leading-6 text-stone-600">
+                  Create a dedicated direct-message channel in the current company. The session opens immediately after creation.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setNewDmOpen(false);
+                  setNewDmName("");
+                }}
+                className="rounded-full border border-stone-200 bg-stone-50 p-2 text-stone-600"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <form
+              className="mt-5"
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (!companyId || !newDmName.trim()) {
+                  return;
+                }
+                createDmMutation.mutate({
+                  companyId,
+                  name: newDmName.trim(),
+                });
+              }}
+            >
+              <label className="block">
+                <span className="text-sm font-medium text-stone-700">Channel name</span>
+                <input
+                  value={newDmName}
+                  onChange={(event) => setNewDmName(event.target.value)}
+                  placeholder="Product leadership DM"
+                  className="mt-2 w-full rounded-2xl border border-stone-200 bg-stone-50 px-4 py-3 text-sm text-stone-900 outline-none transition focus:border-stone-400"
+                />
+              </label>
+              <div className="mt-5 flex items-center justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNewDmOpen(false);
+                    setNewDmName("");
+                  }}
+                  className="rounded-full border border-stone-200 bg-white px-4 py-2 text-sm font-medium text-stone-700"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!companyId || !newDmName.trim() || createDmMutation.isPending}
+                  className="rounded-full bg-stone-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-stone-300"
+                >
+                  {createDmMutation.isPending ? "Creating…" : "Create DM"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
     </main>
-  );
-}
-
-function StatusPill(props: { label: string; value: string; tone: "green" | "amber" }) {
-  const toneClass = props.tone === "green" ? "bg-green-500" : "bg-amber-500";
-
-  return (
-    <div className="flex items-center gap-2 rounded-full border border-stone-200 bg-white px-3 py-1.5">
-      <span className={cn("h-2 w-2 rounded-full", toneClass)} />
-      <span className="text-xs font-semibold uppercase tracking-[0.16em] text-stone-500">{props.label}</span>
-      <span className="text-sm font-medium text-stone-700">{props.value}</span>
-    </div>
   );
 }
 
