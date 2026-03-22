@@ -38,6 +38,7 @@ export function assemblePacket(input: AssemblePacketInput): PacketAssemblyResult
 
   const priorTurns = input.turns.filter((turn) => turn.seq < input.triggeringTurn.seq);
   const tailTurns = buildVerbatimTail(priorTurns, kTokens);
+  const tailStartSeq = tailTurns[0]?.seq ?? input.triggeringTurn.seq;
 
   if (mode === "active") {
     return {
@@ -62,7 +63,8 @@ export function assemblePacket(input: AssemblePacketInput): PacketAssemblyResult
   }
 
   if (mode === "observing") {
-    const keptChunks = applyPacketBudget(input.chunks, packetBudget, tailTurns, input.triggeringTurn, input.globalSummary);
+    const eligibleChunks = input.chunks.filter((chunk) => chunk.chunkEnd < tailStartSeq);
+    const keptChunks = applyPacketBudget(eligibleChunks, packetBudget, tailTurns, input.triggeringTurn, input.globalSummary);
     if (keptChunks.length > 0) {
       sections.push(
         keptChunks

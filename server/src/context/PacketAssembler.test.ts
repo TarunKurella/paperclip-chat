@@ -98,6 +98,34 @@ describe("PacketAssembler", () => {
     expect(result.text).not.toContain("[CHUNK 6-10]");
   });
 
+  it("excludes chunks that overlap the verbatim tail", () => {
+    const result = assemblePacket({
+      channelName: "ops",
+      channelType: "project",
+      participantCount: 4,
+      agentName: "Builder",
+      senderName: "Dana",
+      agentState: makeState({ status: "observing", anchorSeq: 1 }),
+      currentSeq: 12,
+      triggeringTurn: makeTurn({ seq: 12, content: "Please catch up", tokenCount: 10 }),
+      turns: [
+        makeTurn({ seq: 9, content: "turn-9", tokenCount: 40 }),
+        makeTurn({ seq: 10, content: "turn-10", tokenCount: 40 }),
+        makeTurn({ seq: 11, content: "turn-11", tokenCount: 40 }),
+      ],
+      chunks: [
+        makeChunk({ chunkStart: 2, chunkEnd: 6, summary: "older context" }),
+        makeChunk({ chunkStart: 7, chunkEnd: 9, summary: "overlaps tail" }),
+      ],
+      globalSummary: null,
+      kTokens: 120,
+    });
+
+    expect(result.text).toContain("[CHUNK 2-6]");
+    expect(result.text).not.toContain("[CHUNK 7-9]");
+    expect(result.text).toContain("[Recent turns verbatim]");
+  });
+
   it("detects the DM shortcut only for two-party dm channels", () => {
     expect(shouldUseDmShortcut("dm", 2)).toBe(true);
     expect(shouldUseDmShortcut("dm", 3)).toBe(false);

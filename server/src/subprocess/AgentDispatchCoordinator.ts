@@ -57,8 +57,7 @@ export class AgentDispatchCoordinator {
       ? []
       : (await this.context.listChunks(sessionId)).filter(
           (chunk) =>
-            chunk.chunkStart > agentState.anchorSeq &&
-            chunk.chunkEnd < triggeringTurn.seq,
+            chunk.chunkStart > agentState.anchorSeq,
         );
 
     const packet = assemblePacket({
