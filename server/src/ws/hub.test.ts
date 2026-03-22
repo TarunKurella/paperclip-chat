@@ -62,6 +62,39 @@ describe("ChatWsHub", () => {
     nonSubscriber.close();
   });
 
+  it("replays missed turns on subscribe when last_seq is provided", async () => {
+    const { url, hub, close } = await startHubServer();
+    servers.push({ close });
+
+    hub.setReplayProvider(async (_sessionId, lastSeq) => [
+      {
+        id: "turn-2",
+        sessionId: "session-1",
+        seq: lastSeq + 1,
+        fromParticipantId: "agent-1",
+        content: "caught up",
+        tokenCount: 12,
+        summarize: false,
+        mentionedIds: null,
+        isDecision: false,
+        createdAt: new Date().toISOString(),
+      },
+    ]);
+
+    const client = new WebSocket(`${url}/ws?token=service-secret`);
+    await waitForOpen(client);
+
+    const messagePromise = waitForMessage(client);
+    client.send(JSON.stringify({ type: "subscribe", channelId: "channel-1", sessionId: "session-1", lastSeq: 1 }));
+
+    const message = JSON.parse(await messagePromise);
+    expect(message.type).toBe(CHAT_EVENT_TYPES.CHAT_MESSAGE);
+    expect(message.payload.turn.id).toBe("turn-2");
+    expect(message.payload.turn.seq).toBe(2);
+
+    client.close();
+  });
+
   it("broadcasts notifications to connected users", async () => {
     const { url, hub, close, paperclipClient } = await startHubServer();
     servers.push({ close });

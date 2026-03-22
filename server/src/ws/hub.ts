@@ -2,7 +2,7 @@ import { URL } from "node:url";
 import type { IncomingMessage } from "node:http";
 import type { Server as HttpServer } from "node:http";
 import { WebSocketServer, WebSocket } from "ws";
-import { CHAT_EVENT_TYPES } from "@paperclip-chat/shared";
+import { CHAT_EVENT_TYPES, type Turn } from "@paperclip-chat/shared";
 import { authenticate, type Principal } from "../auth/authenticate.js";
 import type { PaperclipClient } from "../adapters/paperclipClient.js";
 
@@ -37,6 +37,7 @@ export class ChatWsHub {
   readonly server = new WebSocketServer({ noServer: true });
   private readonly clients = new Map<WebSocket, ClientState>();
   private keepaliveTimer: NodeJS.Timeout | null = null;
+  private replayProvider: ((sessionId: string, lastSeq: number) => Promise<Turn[]>) | null = null;
 
   constructor(
     private readonly paperclipClient: Pick<PaperclipClient, "validateSession" | "validateAgentJwt">,
@@ -120,6 +121,10 @@ export class ChatWsHub {
     return false;
   }
 
+  setReplayProvider(provider: (sessionId: string, lastSeq: number) => Promise<Turn[]>): void {
+    this.replayProvider = provider;
+  }
+
   private register(socket: WebSocket, principal: Principal): void {
     this.logger.info(`WS client connected: ${principal.type}:${principal.id}`);
     this.clients.set(socket, {
@@ -145,6 +150,13 @@ export class ChatWsHub {
     }
 
     state.subscribedChannels.add(parsed.channelId);
+    const lastSeq = typeof parsed.lastSeq === "number" ? parsed.lastSeq : null;
+    const sessionId = typeof parsed.sessionId === "string" ? parsed.sessionId : null;
+    if (lastSeq === null || !sessionId || !this.replayProvider) {
+      return;
+    }
+
+    void this.replayMissedTurns(socket, sessionId, lastSeq);
   }
 
   private onPong(socket: WebSocket): void {
@@ -194,6 +206,22 @@ export class ChatWsHub {
       this.env,
     );
     return principal;
+  }
+
+  private async replayMissedTurns(socket: WebSocket, sessionId: string, lastSeq: number): Promise<void> {
+    if (!this.replayProvider) {
+      return;
+    }
+
+    const turns = await this.replayProvider(sessionId, lastSeq);
+    for (const turn of turns) {
+      socket.send(
+        serializeEnvelope({
+          type: CHAT_EVENT_TYPES.CHAT_MESSAGE,
+          payload: { turn },
+        }),
+      );
+    }
   }
 }
 

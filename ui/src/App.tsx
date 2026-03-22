@@ -246,10 +246,6 @@ function Shell() {
     }),
   );
 
-  if (!selectedChannel && channels.length > 0 && location.pathname !== "/notifications") {
-    return <Navigate to={`/channels/${channels[0]!.id}${location.search}`} replace />;
-  }
-
   useEffect(() => {
     setVisibleEntryCount(20);
   }, [selectedChannelId, selectedSessionId]);
@@ -259,104 +255,147 @@ function Shell() {
       return;
     }
 
-    const socket = new WebSocket(buildChatWsUrl(window.location));
+    let socket: WebSocket | null = null;
+    let reconnectTimer: number | null = null;
+    let disposed = false;
+    let attempts = 0;
     let activeChannelId: string | null = null;
 
-    socket.addEventListener("open", () => {
-      if (selectedChannel?.id) {
-        activeChannelId = selectedChannel.id;
-        socket.send(JSON.stringify({ type: "subscribe", channelId: selectedChannel.id }));
-      }
-    });
-
-    socket.addEventListener("message", (event) => {
-      const envelope = parseWsEnvelope(event.data);
-      if (!envelope) {
+    const connect = () => {
+      if (disposed) {
         return;
       }
 
-      if (envelope.type === "chat.message") {
-        const turn = readTurnPayload(envelope.payload);
-        if (!turn || !selectedChannel || !selectedSessionId || activeChannelId !== selectedChannel.id) {
+      socket = new WebSocket(buildChatWsUrl(window.location));
+
+      socket.addEventListener("open", () => {
+        attempts = 0;
+        if (selectedChannel?.id) {
+          activeChannelId = selectedChannel.id;
+          const lastSeq =
+            queryClient
+              .getQueryData<{ turns: Turn[] }>(["messages", selectedChannel.id, selectedSessionId])
+              ?.turns.at(-1)?.seq ?? 0;
+          socket?.send(
+            JSON.stringify({
+              type: "subscribe",
+              channelId: selectedChannel.id,
+              sessionId: selectedSessionId,
+              lastSeq,
+            }),
+          );
+        }
+      });
+
+      socket.addEventListener("message", (event) => {
+        const envelope = parseWsEnvelope(event.data);
+        if (!envelope) {
           return;
         }
 
-        queryClient.setQueryData<{ turns: Turn[] }>(
-          ["messages", selectedChannel.id, selectedSessionId],
-          (current) => ({
-            turns: dedupeTurns([...(current?.turns ?? []), turn]),
-          }),
-        );
-        setOptimisticMessages((current) => ({
-          ...current,
-          [selectedChannel.id]: (current[selectedChannel.id] ?? []).filter((entry) => entry.body !== turn.content),
-        }));
-        return;
-      }
+        if (envelope.type === "chat.message") {
+          const turn = readTurnPayload(envelope.payload);
+          if (!turn || !selectedChannel || !selectedSessionId || activeChannelId !== selectedChannel.id) {
+            return;
+          }
 
-      if (envelope.type === "session.decision") {
-        const turn = readTurnPayload(envelope.payload);
-        if (!turn || !selectedChannel || !selectedSessionId || activeChannelId !== selectedChannel.id) {
+          queryClient.setQueryData<{ turns: Turn[] }>(
+            ["messages", selectedChannel.id, selectedSessionId],
+            (current) => ({
+              turns: dedupeTurns([...(current?.turns ?? []), turn]),
+            }),
+          );
+          setOptimisticMessages((current) => ({
+            ...current,
+            [selectedChannel.id]: (current[selectedChannel.id] ?? []).filter((entry) => entry.body !== turn.content),
+          }));
           return;
         }
 
-        setLiveDecision(mapTurnToEntry(turn));
-        return;
-      }
+        if (envelope.type === "session.decision") {
+          const turn = readTurnPayload(envelope.payload);
+          if (!turn || !selectedChannel || !selectedSessionId || activeChannelId !== selectedChannel.id) {
+            return;
+          }
 
-      if (envelope.type === "notification.new") {
-        const notification = readNotificationPayload(envelope.payload);
-        if (!notification) {
+          setLiveDecision(mapTurnToEntry(turn));
           return;
         }
 
-        queryClient.setQueryData<{ notifications: Notification[] }>(["notifications"], (current) => ({
-          notifications: dedupeNotifications([notification, ...(current?.notifications ?? [])]),
-        }));
-        return;
-      }
+        if (envelope.type === "notification.new") {
+          const notification = readNotificationPayload(envelope.payload);
+          if (!notification) {
+            return;
+          }
 
-      if (envelope.type === "agent.status") {
-        const presence = readPresencePayload(envelope.payload);
-        if (!presence) {
+          queryClient.setQueryData<{ notifications: Notification[] }>(["notifications"], (current) => ({
+            notifications: dedupeNotifications([notification, ...(current?.notifications ?? [])]),
+          }));
           return;
         }
 
-        setPresenceByAgent((current) => ({
-          ...current,
-          [presence.agentId]: {
-            status: presence.status,
-            updatedAt: presence.updatedAt,
-          },
-        }));
-        return;
-      }
+        if (envelope.type === "agent.status") {
+          const presence = readPresencePayload(envelope.payload);
+          if (!presence) {
+            return;
+          }
 
-      if (envelope.type === "session.closed") {
-        const closedSessionId = readSessionClosedPayload(envelope.payload);
-        if (!closedSessionId || !selectedSessionId || closedSessionId !== selectedSessionId) {
+          setPresenceByAgent((current) => ({
+            ...current,
+            [presence.agentId]: {
+              status: presence.status,
+              updatedAt: presence.updatedAt,
+            },
+          }));
           return;
         }
 
-        queryClient.setQueryData<{ session: ChatSession; agentStates: AgentChannelState[] }>(
-          ["session", selectedSessionId],
-          (current) => current
-            ? {
-                ...current,
-                session: {
-                  ...current.session,
-                  status: "closed",
-                },
-              }
-            : undefined,
-        );
-      }
-    });
+        if (envelope.type === "session.closed") {
+          const closedSessionId = readSessionClosedPayload(envelope.payload);
+          if (!closedSessionId || !selectedSessionId || closedSessionId !== selectedSessionId) {
+            return;
+          }
+
+          queryClient.setQueryData<{ session: ChatSession; agentStates: AgentChannelState[] }>(
+            ["session", selectedSessionId],
+            (current) => current
+              ? {
+                  ...current,
+                  session: {
+                    ...current.session,
+                    status: "closed",
+                  },
+                }
+              : undefined,
+          );
+        }
+      });
+
+      socket.addEventListener("close", () => {
+        if (disposed) {
+          return;
+        }
+
+        const nextDelay = Math.min(5_000, 500 * 2 ** attempts);
+        attempts += 1;
+        reconnectTimer = window.setTimeout(connect, nextDelay);
+      });
+    };
+
+    connect();
 
     return () => {
-      socket.close();
+      disposed = true;
+      if (reconnectTimer !== null) {
+        window.clearTimeout(reconnectTimer);
+      }
+      socket?.close();
     };
   }, [queryClient, selectedChannel, selectedSessionId]);
+
+  if (!selectedChannel && channels.length > 0 && location.pathname !== "/notifications") {
+    return <Navigate to={`/channels/${channels[0]!.id}${location.search}`} replace />;
+  }
 
   return (
     <main className="min-h-screen bg-stone-100 text-neutral-950">
