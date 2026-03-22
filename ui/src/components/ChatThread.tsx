@@ -35,17 +35,17 @@ export function ChatThread(props: {
   return (
     <div className="flex-1 space-y-4 overflow-y-auto px-6 py-5">
       {!props.sessionClosed && props.openingSession ? (
-        <article className="rounded-3xl border border-dashed border-stone-300 bg-stone-50 px-4 py-4 text-sm text-stone-500">
+        <article className="rounded-md border border-dashed border-stone-300 bg-stone-50 px-4 py-3 text-sm text-stone-500">
           Opening a session for this channel…
         </article>
       ) : null}
       {props.sessionClosed ? (
-        <article className="rounded-3xl border border-stone-200 bg-stone-100 px-4 py-4 text-sm text-stone-600">
+        <article className="rounded-md border border-stone-200 bg-stone-100 px-4 py-3 text-sm text-stone-600">
           This session has been closed. You can still review the transcript, but sending is disabled.
         </article>
       ) : null}
       {props.liveDecision ? (
-        <article className="rounded-3xl border border-amber-200 bg-amber-50 px-4 py-4">
+        <article className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3">
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-3">
               <span className="h-2.5 w-2.5 rounded-full bg-amber-500" />
@@ -54,7 +54,7 @@ export function ChatThread(props: {
             <button
               type="button"
               onClick={props.onDismissDecision}
-              className="rounded-full border border-amber-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-amber-700"
+              className="rounded-sm border border-amber-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-amber-700"
             >
               dismiss
             </button>
@@ -67,7 +67,7 @@ export function ChatThread(props: {
           <button
             type="button"
             onClick={props.onShowMore}
-            className="rounded-full border border-stone-200 bg-white px-4 py-2 text-xs font-medium uppercase tracking-[0.14em] text-stone-600 transition hover:bg-stone-50"
+            className="rounded-md border border-stone-200 bg-white px-4 py-2 text-xs font-medium uppercase tracking-[0.14em] text-stone-600 transition hover:bg-stone-50"
           >
             Show {hiddenCount} earlier message{hiddenCount === 1 ? "" : "s"}
           </button>
@@ -77,8 +77,8 @@ export function ChatThread(props: {
         <article
           key={entry.id}
           className={cn(
-            "rounded-3xl border px-4 py-4",
-            entry.isDecision ? "border-amber-200 bg-amber-50/80" : "border-stone-200 bg-stone-50/70",
+            "border-b border-stone-200 px-1 py-4 last:border-b-0",
+            entry.isDecision ? "bg-amber-50/70" : "bg-transparent",
           )}
         >
           <div className="flex items-center justify-between gap-4">
@@ -89,28 +89,28 @@ export function ChatThread(props: {
                   entry.kind === "agent" ? "bg-green-500" : "bg-gray-400",
                 )}
               />
-              <p className="text-sm font-semibold text-stone-900">{entry.author}</p>
-              <span className="text-xs uppercase tracking-[0.16em] text-stone-500">{entry.kind}</span>
+              <p className="text-[13px] font-semibold text-stone-900">{entry.author}</p>
+              <span className="text-[11px] uppercase tracking-[0.16em] text-stone-500">{entry.kind}</span>
               {entry.isDecision ? (
-                <span className="rounded-full border border-amber-200 bg-white px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-amber-700">
+                <span className="rounded-sm border border-amber-200 bg-white px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-amber-700">
                   decision
                 </span>
               ) : null}
             </div>
             <span className="text-xs text-stone-500">{entry.timestamp}</span>
           </div>
-          <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-stone-700">{entry.body}</p>
+          <div className="mt-3 whitespace-pre-wrap text-[15px] leading-7 text-stone-700">{entry.body}</div>
         </article>
       ))}
       {props.agentStates.length > 0 || Object.keys(props.presenceByAgent).length > 0 ? (
-        <section className="rounded-3xl border border-stone-200 bg-white px-4 py-4">
+        <section className="rounded-md border border-stone-200 bg-white px-4 py-4">
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-stone-500">Realtime activity</p>
           {props.agentStates.length > 0 ? (
             <div className="mt-3 flex flex-wrap gap-2">
               {props.agentStates.map((state) => (
                 <span
                   key={state.id}
-                  className="inline-flex items-center gap-2 rounded-full border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-medium text-stone-700"
+                  className="inline-flex items-center gap-2 rounded-sm border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-medium text-stone-700"
                 >
                   <span className={cn("h-2 w-2 rounded-full", agentStateToneClass(state.status))} />
                   {state.participantId.slice(0, 6)} {state.status} · idle {state.idleTurnCount}
@@ -123,7 +123,7 @@ export function ChatThread(props: {
               {Object.entries(props.presenceByAgent).map(([agentId, presence]) => (
                 <span
                   key={agentId}
-                  className="inline-flex items-center gap-2 rounded-full border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-medium text-stone-700"
+                  className="inline-flex items-center gap-2 rounded-sm border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-medium text-stone-700"
                 >
                   <span className={cn("h-2 w-2 rounded-full", presenceToneClass(presence.status))} />
                   {agentId.slice(0, 6)} {presence.status}

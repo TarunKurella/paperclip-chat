@@ -44,7 +44,7 @@ export function Sidebar(props: {
   ].filter((group) => group.channels.length > 0);
 
   return (
-    <aside className="rounded-[28px] border border-stone-200 bg-white shadow-[0_1px_0_rgba(0,0,0,0.04)]">
+    <aside className="rounded-lg border border-stone-200 bg-white shadow-sm">
       <div className="border-b border-stone-200 px-5 py-4">
         <div className="flex items-center justify-between">
           <div>
@@ -57,7 +57,7 @@ export function Sidebar(props: {
               disabled={!props.canCreateDm}
               onClick={props.onCreateDm}
               className={cn(
-                "rounded-full border px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.14em] transition",
+                "rounded-md border px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.14em] transition",
                 props.canCreateDm
                   ? "border-stone-200 bg-stone-50 text-stone-700 hover:bg-stone-100"
                   : "border-stone-200 bg-stone-50 text-stone-400",
@@ -65,7 +65,7 @@ export function Sidebar(props: {
             >
               New DM
             </button>
-            <span className="rounded-full bg-stone-100 px-2.5 py-1 text-xs font-medium text-stone-600">
+            <span className="rounded-sm bg-stone-100 px-2.5 py-1 text-xs font-medium text-stone-600">
               {props.channels.length}
             </span>
           </div>
@@ -79,7 +79,7 @@ export function Sidebar(props: {
 
       <div className="space-y-4 px-3 py-3">
         {pendingChannels.length > 0 ? (
-          <section className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-3">
+          <section className="rounded-md border border-amber-200 bg-amber-50 px-3 py-3">
             <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-700">
               Pending agent requests
             </p>
@@ -137,19 +137,19 @@ function SidebarRow(props: {
       type="button"
       onClick={props.onClick}
       className={cn(
-        "flex w-full items-start gap-3 rounded-2xl px-3 py-3 text-left transition",
-        props.selected ? "bg-stone-100" : props.emphasized ? "hover:bg-amber-100/80" : "hover:bg-stone-50",
+        "flex w-full items-start gap-2.5 rounded-md border border-transparent px-3 py-2 text-left transition",
+        props.selected ? "border-stone-200 bg-stone-100" : props.emphasized ? "hover:bg-amber-100/80" : "hover:bg-stone-50",
       )}
     >
       <div className={cn("mt-1 h-2.5 w-2.5 rounded-full", props.unreadCount > 0 ? "bg-blue-500" : props.hasSession ? "bg-green-500" : "bg-gray-400")} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-2">
-            <p className={cn("truncate text-sm text-stone-900", props.unreadCount > 0 ? "font-semibold" : "font-medium")}>
+            <p className={cn("truncate text-[13px] text-stone-900", props.unreadCount > 0 ? "font-semibold" : "font-medium")}>
               {props.channel.name}
             </p>
             {props.hasSession ? (
-              <span className="rounded-full border border-stone-200 bg-white px-2 py-0.5 text-[11px] font-medium uppercase tracking-[0.14em] text-stone-500">
+              <span className="rounded-sm border border-stone-200 bg-white px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.14em] text-stone-500">
                 live
               </span>
             ) : null}
@@ -159,7 +159,7 @@ function SidebarRow(props: {
               <span className="text-[11px] font-medium text-stone-400">{props.preview.timestamp}</span>
             ) : null}
             {props.unreadCount > 0 ? (
-              <span className="rounded-full bg-blue-500 px-2 py-0.5 text-[11px] font-semibold text-white">
+              <span className="rounded-sm bg-blue-500 px-2 py-0.5 text-[11px] font-semibold text-white">
                 {props.unreadCount}
               </span>
             ) : null}
@@ -167,7 +167,7 @@ function SidebarRow(props: {
           </div>
         </div>
         <p className="mt-1 text-xs uppercase tracking-[0.16em] text-stone-500">{props.channel.type.replace("_", " ")}</p>
-        <p className="mt-2 line-clamp-2 text-sm leading-5 text-stone-500">
+        <p className="mt-1.5 line-clamp-2 text-[13px] leading-5 text-stone-500">
           {props.preview?.body ?? defaultPreview(props.channel)}
         </p>
       </div>

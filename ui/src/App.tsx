@@ -400,10 +400,10 @@ function Shell() {
   return (
     <main className="min-h-screen bg-stone-100 text-neutral-950">
       <div className="mx-auto flex min-h-screen max-w-[1600px] flex-col px-4 py-4 lg:px-6">
-        <header className="mb-4 rounded-[28px] border border-stone-200 bg-white/95 px-5 py-4 shadow-[0_1px_0_rgba(0,0,0,0.04)]">
+        <header className="mb-4 rounded-lg border border-stone-200 bg-white/95 px-5 py-4 shadow-sm">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex items-center gap-4">
-              <div className="rounded-2xl border border-stone-200 bg-stone-100 p-3">
+              <div className="rounded-md border border-stone-200 bg-stone-100 p-3">
                 <MessageSquareText className="h-6 w-6" />
               </div>
               <div>
@@ -417,7 +417,7 @@ function Shell() {
               <button
                 type="button"
                 onClick={() => setMobileSidebarOpen(true)}
-                className="inline-flex items-center gap-2 rounded-full border border-stone-200 bg-stone-50 px-3 py-2 text-sm font-medium text-stone-700"
+                className="inline-flex items-center gap-2 rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-sm font-medium text-stone-700"
               >
                 <PanelLeft className="h-4 w-4" />
                 Channels
@@ -425,7 +425,7 @@ function Shell() {
               <button
                 type="button"
                 onClick={() => setMobileActivityOpen(true)}
-                className="inline-flex items-center gap-2 rounded-full border border-stone-200 bg-stone-50 px-3 py-2 text-sm font-medium text-stone-700"
+                className="inline-flex items-center gap-2 rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-sm font-medium text-stone-700"
               >
                 <PanelRight className="h-4 w-4" />
                 Activity
@@ -435,7 +435,7 @@ function Shell() {
               <StatusPill label="Server" value={healthQuery.data?.status ?? "loading"} tone={healthQuery.data?.status === "ok" ? "green" : "amber"} />
               <StatusPill label="Paperclip" value={healthQuery.data?.paperclip ?? "pending"} tone={healthQuery.data?.paperclip === "connected" ? "green" : "amber"} />
               <StatusPill label="Realtime" value={healthQuery.data?.ws ?? "pending"} tone={healthQuery.data?.ws === "running" ? "green" : "amber"} />
-              <div className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-medium text-stone-600">
+              <div className="rounded-md border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-medium text-stone-600">
                 {companyId ? `companyId ${companyId.slice(0, 8)}…` : "Add ?companyId=<uuid> for live channels"}
               </div>
             </div>
@@ -462,7 +462,7 @@ function Shell() {
             />
           </div>
 
-          <section className="flex min-h-[640px] flex-col rounded-[28px] border border-stone-200 bg-white shadow-[0_1px_0_rgba(0,0,0,0.04)]">
+          <section className="flex min-h-[640px] flex-col rounded-lg border border-stone-200 bg-white shadow-sm">
             <div className="border-b border-stone-200 px-6 py-5">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                 <div>
@@ -479,13 +479,13 @@ function Shell() {
                   </p>
                   {sessionState ? (
                     <div className="mt-3 flex flex-wrap gap-2">
-                      <span className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-medium text-stone-700">
+                      <span className="rounded-sm border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-medium text-stone-700">
                         seq {sessionState.currentSeq}
                       </span>
-                      <span className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-medium text-stone-700">
+                      <span className="rounded-sm border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-medium text-stone-700">
                         window {sessionState.chunkWindowWTokens}w
                       </span>
-                      <span className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-medium text-stone-700">
+                      <span className="rounded-sm border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-medium text-stone-700">
                         verbatim {sessionState.verbatimKTokens}k
                       </span>
                     </div>
@@ -495,7 +495,7 @@ function Shell() {
                       {agentStates.map((state) => (
                         <span
                           key={state.id}
-                          className="inline-flex items-center gap-2 rounded-full border border-stone-200 bg-white px-3 py-1.5 text-xs font-medium text-stone-700"
+                          className="inline-flex items-center gap-2 rounded-sm border border-stone-200 bg-white px-3 py-1.5 text-xs font-medium text-stone-700"
                         >
                           <span className={cn("h-2 w-2 rounded-full", agentStateToneClass(state.status))} />
                           {state.participantId.slice(0, 6)} {state.status} · idle {state.idleTurnCount}
@@ -508,7 +508,7 @@ function Shell() {
                       {Object.entries(presenceByAgent).map(([agentId, presence]) => (
                         <span
                           key={agentId}
-                          className="inline-flex items-center gap-2 rounded-full border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-medium text-stone-700"
+                          className="inline-flex items-center gap-2 rounded-sm border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-medium text-stone-700"
                         >
                           <span className={cn("h-2 w-2 rounded-full", presenceToneClass(presence.status))} />
                           {agentId.slice(0, 6)} {presence.status}
@@ -521,7 +521,7 @@ function Shell() {
                   <Sparkles className="h-4 w-4 text-amber-500" />
                   {selectedSessionId ? `session ${selectedSessionId.slice(0, 8)}…` : "live shell"}
                   {sessionClosed ? (
-                    <span className="rounded-full border border-stone-200 bg-stone-100 px-2 py-1 text-[11px] uppercase tracking-[0.14em] text-stone-600">
+                    <span className="rounded-sm border border-stone-200 bg-stone-100 px-2 py-1 text-[11px] uppercase tracking-[0.14em] text-stone-600">
                       closed
                     </span>
                   ) : null}
@@ -530,7 +530,7 @@ function Shell() {
                       type="button"
                       onClick={() => closeSessionMutation.mutate({ sessionId: selectedSessionId })}
                       disabled={sessionClosed || closeSessionMutation.isPending}
-                      className="ml-2 inline-flex items-center gap-1 rounded-full border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-medium text-stone-700 transition hover:bg-stone-100 disabled:cursor-not-allowed disabled:text-stone-400"
+                      className="ml-2 inline-flex items-center gap-1 rounded-md border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-medium text-stone-700 transition hover:bg-stone-100 disabled:cursor-not-allowed disabled:text-stone-400"
                     >
                       {sessionClosed ? <Lock className="h-3.5 w-3.5" /> : <X className="h-3.5 w-3.5" />}
                       {closeSessionMutation.isPending ? "Closing…" : sessionClosed ? "Session closed" : "Close session"}
@@ -610,10 +610,10 @@ function Shell() {
             </div>
           </section>
 
-          <aside className="hidden rounded-[28px] border border-stone-200 bg-white shadow-[0_1px_0_rgba(0,0,0,0.04)] lg:block">
+          <aside className="hidden rounded-lg border border-stone-200 bg-white shadow-sm lg:block">
             <div className="border-b border-stone-200 px-5 py-4">
               <div className="flex items-center gap-3">
-                <div className="rounded-2xl bg-amber-50 p-2 text-amber-600">
+                <div className="rounded-md bg-amber-50 p-2 text-amber-600">
                   <BellRing className="h-4 w-4" />
                 </div>
                 <div>
@@ -625,16 +625,16 @@ function Shell() {
               </div>
               {selectedSessionId ? (
                 <div className="mt-3 flex flex-wrap gap-2 text-xs font-medium text-stone-600">
-                  <span className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1.5">
+                  <span className="rounded-sm border border-stone-200 bg-stone-50 px-3 py-1.5">
                     total {totalTokenCount} tok
                   </span>
-                  <span className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1.5">
+                  <span className="rounded-sm border border-stone-200 bg-stone-50 px-3 py-1.5">
                     turns {tokenTurns.length}
                   </span>
                 </div>
               ) : null}
               {unauthenticatedNotifications ? (
-                <div className="mt-3 flex items-start gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800">
+                <div className="mt-3 flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800">
                   <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
                   <p>Showing preview notifications until a Paperclip-authenticated browser session is present.</p>
                 </div>
@@ -642,7 +642,7 @@ function Shell() {
             </div>
             <div className="space-y-3 px-4 py-4">
               {selectedSessionId ? (
-                <section className="rounded-2xl border border-stone-200 bg-stone-50 px-4 py-4">
+                <section className="rounded-md border border-stone-200 bg-stone-50 px-4 py-4">
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <p className="text-sm font-semibold text-stone-900">Session telemetry</p>
@@ -654,7 +654,7 @@ function Shell() {
                     {tokenTurns.slice(-5).reverse().map((turn) => (
                       <div
                         key={turn.id}
-                        className="flex items-center justify-between gap-3 rounded-2xl border border-stone-200 bg-white px-3 py-2"
+                        className="flex items-center justify-between gap-3 rounded-sm border border-stone-200 bg-white px-3 py-2"
                       >
                         <div className="min-w-0">
                           <p className="truncate text-xs font-medium text-stone-900">
@@ -679,14 +679,14 @@ function Shell() {
                     type="button"
                     onClick={() => markNotificationsReadMutation.mutate(notifications.map((notification) => notification.id))}
                     disabled={markNotificationsReadMutation.isPending}
-                    className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-medium text-stone-700 transition hover:bg-stone-100 disabled:cursor-not-allowed disabled:text-stone-400"
+                    className="rounded-md border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-medium text-stone-700 transition hover:bg-stone-100 disabled:cursor-not-allowed disabled:text-stone-400"
                   >
                     {markNotificationsReadMutation.isPending ? "Clearing…" : "Mark all read"}
                   </button>
                 </div>
               ) : null}
               {notifications.map((notification) => (
-                <article key={notification.id} className="rounded-2xl border border-stone-200 bg-stone-50 px-4 py-4">
+                <article key={notification.id} className="rounded-md border border-stone-200 bg-stone-50 px-4 py-4">
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <p className="text-sm font-semibold text-stone-900">{renderNotificationTitle(notification)}</p>
@@ -706,7 +706,7 @@ function Shell() {
                           type="button"
                           onClick={() => navigate(`/channels/${notification.payload.channelId}${location.search}`)}
                           className={cn(
-                            "rounded-full border px-3 py-1.5 text-xs font-medium transition",
+                            "rounded-md border px-3 py-1.5 text-xs font-medium transition",
                             notificationsRoute ? "border-amber-200 bg-amber-50 text-amber-700" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-100",
                           )}
                         >
@@ -717,7 +717,7 @@ function Shell() {
                         type="button"
                         onClick={() => markNotificationsReadMutation.mutate([notification.id])}
                         disabled={markNotificationsReadMutation.isPending}
-                        className="rounded-full border border-stone-200 bg-white px-3 py-1.5 text-xs font-medium text-stone-700 transition hover:bg-stone-100 disabled:cursor-not-allowed disabled:text-stone-400"
+                        className="rounded-md border border-stone-200 bg-white px-3 py-1.5 text-xs font-medium text-stone-700 transition hover:bg-stone-100 disabled:cursor-not-allowed disabled:text-stone-400"
                       >
                         Mark read
                       </button>
@@ -736,7 +736,7 @@ function Shell() {
               <button
                 type="button"
                 onClick={() => setMobileSidebarOpen(false)}
-                className="inline-flex items-center gap-2 rounded-full border border-stone-200 bg-white px-3 py-2 text-sm font-medium text-stone-700"
+                className="inline-flex items-center gap-2 rounded-md border border-stone-200 bg-white px-3 py-2 text-sm font-medium text-stone-700"
               >
                 <X className="h-4 w-4" />
                 Close
@@ -771,16 +771,16 @@ function Shell() {
               <button
                 type="button"
                 onClick={() => setMobileActivityOpen(false)}
-                className="inline-flex items-center gap-2 rounded-full border border-stone-200 bg-white px-3 py-2 text-sm font-medium text-stone-700"
+                className="inline-flex items-center gap-2 rounded-md border border-stone-200 bg-white px-3 py-2 text-sm font-medium text-stone-700"
               >
                 <X className="h-4 w-4" />
                 Close
               </button>
             </div>
-            <aside className="flex-1 overflow-y-auto rounded-[28px] border border-stone-200 bg-white shadow-[0_1px_0_rgba(0,0,0,0.04)]">
+            <aside className="flex-1 overflow-y-auto rounded-lg border border-stone-200 bg-white shadow-sm">
               <div className="border-b border-stone-200 px-5 py-4">
                 <div className="flex items-center gap-3">
-                  <div className="rounded-2xl bg-amber-50 p-2 text-amber-600">
+                  <div className="rounded-md bg-amber-50 p-2 text-amber-600">
                     <BellRing className="h-4 w-4" />
                   </div>
                   <div>
@@ -793,7 +793,7 @@ function Shell() {
               </div>
               <div className="space-y-3 px-4 py-4">
                 {notifications.slice(0, 6).map((notification) => (
-                  <article key={`mobile-${notification.id}`} className="rounded-2xl border border-stone-200 bg-stone-50 px-4 py-4">
+                  <article key={`mobile-${notification.id}`} className="rounded-md border border-stone-200 bg-stone-50 px-4 py-4">
                     <p className="text-sm font-semibold text-stone-900">{renderNotificationTitle(notification)}</p>
                     <p className="mt-2 text-sm leading-6 text-stone-600">{renderNotificationBody(notification)}</p>
                     {typeof notification.payload.channelId === "string" ? (
@@ -803,7 +803,7 @@ function Shell() {
                           setMobileActivityOpen(false);
                           navigate(`/channels/${notification.payload.channelId}${location.search}`);
                         }}
-                        className="mt-3 rounded-full border border-stone-200 bg-white px-3 py-1.5 text-xs font-medium text-stone-700"
+                        className="mt-3 rounded-md border border-stone-200 bg-white px-3 py-1.5 text-xs font-medium text-stone-700"
                       >
                         Open channel
                       </button>
@@ -817,7 +817,7 @@ function Shell() {
       ) : null}
       {newDmOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 px-4">
-          <div className="w-full max-w-md rounded-[28px] border border-stone-200 bg-white p-6 shadow-[0_12px_40px_rgba(0,0,0,0.12)]">
+          <div className="w-full max-w-md rounded-lg border border-stone-200 bg-white p-6 shadow-sm">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">Direct Message</p>
@@ -832,7 +832,7 @@ function Shell() {
                   setNewDmOpen(false);
                   setNewDmName("");
                 }}
-                className="rounded-full border border-stone-200 bg-stone-50 p-2 text-stone-600"
+                className="rounded-md border border-stone-200 bg-stone-50 p-2 text-stone-600"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -856,7 +856,7 @@ function Shell() {
                   value={newDmName}
                   onChange={(event) => setNewDmName(event.target.value)}
                   placeholder="Product leadership DM"
-                  className="mt-2 w-full rounded-2xl border border-stone-200 bg-stone-50 px-4 py-3 text-sm text-stone-900 outline-none transition focus:border-stone-400"
+                  className="mt-2 w-full rounded-md border border-stone-200 bg-stone-50 px-4 py-3 text-sm text-stone-900 outline-none transition focus:border-stone-400"
                 />
               </label>
               <div className="mt-5 flex items-center justify-end gap-3">
@@ -866,14 +866,14 @@ function Shell() {
                     setNewDmOpen(false);
                     setNewDmName("");
                   }}
-                  className="rounded-full border border-stone-200 bg-white px-4 py-2 text-sm font-medium text-stone-700"
+                  className="rounded-md border border-stone-200 bg-white px-4 py-2 text-sm font-medium text-stone-700"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={!companyId || !newDmName.trim() || createDmMutation.isPending}
-                  className="rounded-full bg-stone-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-stone-300"
+                  className="rounded-md bg-stone-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-stone-300"
                 >
                   {createDmMutation.isPending ? "Creating…" : "Create DM"}
                 </button>
