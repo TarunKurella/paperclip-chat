@@ -81,6 +81,10 @@ export class InMemorySessionRepository implements SessionRepository, TrunkStore,
     return [...(this.sessionParticipants.get(sessionId) ?? [])];
   }
 
+  async getSessionSummary(sessionId: string): Promise<SessionSummary | null> {
+    return this.summaries.get(sessionId) ?? null;
+  }
+
   async listAgentStates(sessionId: string): Promise<AgentChannelState[]> {
     return [...(this.agentStates.get(sessionId) ?? [])];
   }

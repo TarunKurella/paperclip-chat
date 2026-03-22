@@ -100,6 +100,13 @@ describe("SessionManager", () => {
 
   it("crystallizes a session into a Paperclip issue and writes para-memory", async () => {
     const fixture = createFixture({
+      sessionSummary: {
+        sessionId: "session-1",
+        text: "Folded summary for crystallize",
+        tokenCount: 42,
+        chunkSeqCovered: 2,
+        updatedAt: new Date("2026-03-21T00:00:00.000Z").toISOString(),
+      },
       participants: [
         { participantId: "human-1", participantType: "human", companyId: "company-1" },
         { participantId: "agent-1", participantType: "agent", companyId: "company-1" },
@@ -121,17 +128,43 @@ describe("SessionManager", () => {
 
     expect(fixture.paperclipClient.createIssue).toHaveBeenCalledWith(
       "company-1",
-      expect.objectContaining({
-        title: expect.stringContaining("[CHAT]"),
-        description: expect.stringContaining("[DECISION] Ship the rollout"),
-      }),
+      expect.objectContaining({ title: expect.stringContaining("[CHAT]"), description: "Folded summary for crystallize" }),
     );
     expect(fixture.paraMemoryWriter.write).toHaveBeenCalledWith(
       ["agent-1"],
       "session-1",
-      expect.stringContaining("Participants:"),
+      expect.stringContaining("Folded summary for crystallize"),
     );
     expect(result.paperclipIssueId).toBe("issue-1");
+  });
+
+  it("falls back to the local crystallize summary when no folded summary exists", async () => {
+    const fixture = createFixture({
+      participants: [
+        { participantId: "human-1", participantType: "human", companyId: "company-1" },
+        { participantId: "agent-1", participantType: "agent", companyId: "company-1" },
+      ],
+      turns: [
+        makeTurn(),
+        {
+          ...makeTurn(),
+          id: "turn-2",
+          seq: 2,
+          fromParticipantId: "agent-1",
+          content: "[DECISION] Fall back path",
+          isDecision: true,
+        },
+      ],
+    });
+
+    await fixture.manager.closeSession({ sessionId: "session-1", crystallize: true });
+
+    expect(fixture.paperclipClient.createIssue).toHaveBeenCalledWith(
+      "company-1",
+      expect.objectContaining({
+        description: expect.stringContaining("No folded session summary was available."),
+      }),
+    );
   });
 
   it("creates notifications for offline humans only", async () => {
@@ -341,6 +374,7 @@ function createFixture(overrides: Partial<FixtureOptions> = {}) {
     listTurns: vi.fn().mockResolvedValue(turns),
     listChannelParticipants: vi.fn().mockResolvedValue(participants),
     listSessionParticipants: vi.fn().mockResolvedValue(participants),
+    getSessionSummary: vi.fn().mockResolvedValue(overrides.sessionSummary ?? null),
     listAgentStates: vi.fn().mockResolvedValue(agentStates),
     createAgentStates: vi.fn().mockResolvedValue(undefined),
     incrementIdleTurnCount: vi.fn().mockResolvedValue(undefined),
@@ -453,6 +487,13 @@ function makeAgentState(participantId: string): AgentChannelState {
 
 interface FixtureOptions {
   session: ChatSession | null;
+  sessionSummary: {
+    sessionId: string;
+    text: string;
+    tokenCount: number;
+    chunkSeqCovered: number;
+    updatedAt: string;
+  } | null;
   turn: Turn;
   turns: Turn[];
   channel: { id: string; type: "company_general" | "project" | "dm" | "task_thread"; companyId: string; paperclipRefId: string | null; name: string };

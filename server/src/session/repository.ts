@@ -3,12 +3,14 @@ import {
   channelParticipants,
   chatSessions,
   notifications,
+  sessionSummaries,
   turns,
 } from "@paperclip-chat/db";
 import type {
   AgentChannelState,
   ChatSession,
   Notification,
+  SessionSummary,
   Turn,
 } from "@paperclip-chat/shared";
 import { and, asc, eq, gt, inArray, isNull } from "drizzle-orm";
@@ -115,6 +117,25 @@ export class DbSessionRepository implements SessionRepository, NotificationRepos
     }
 
     return this.listChannelParticipants(session.channelId);
+  }
+
+  async getSessionSummary(sessionId: string): Promise<SessionSummary | null> {
+    const row = await this.db
+      .select()
+      .from(sessionSummaries)
+      .where(eq(sessionSummaries.sessionId, sessionId))
+      .limit(1)
+      .then((results) => results[0] ?? null);
+
+    return row
+      ? {
+          sessionId: row.sessionId,
+          text: row.text,
+          tokenCount: row.tokenCount,
+          chunkSeqCovered: row.chunkSeqCovered,
+          updatedAt: row.updatedAt.toISOString(),
+        }
+      : null;
   }
 
   async listAgentStates(sessionId: string): Promise<AgentChannelState[]> {

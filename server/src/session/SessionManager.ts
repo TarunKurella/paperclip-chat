@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { CHAT_DEFAULTS, CHAT_EVENT_TYPES, type AgentChannelState, type Channel, type ChatSession, type Notification, type Turn } from "@paperclip-chat/shared";
+import { CHAT_DEFAULTS, CHAT_EVENT_TYPES, type AgentChannelState, type Channel, type ChatSession, type Notification, type SessionSummary, type Turn } from "@paperclip-chat/shared";
 import type { TrunkManager } from "../context/TrunkManager.js";
 import type { PaperclipClient } from "../adapters/paperclipClient.js";
 import { transitionOnMention } from "../context/AgentChannelState.js";
@@ -30,6 +30,7 @@ export interface SessionRepository {
   listTurns(sessionId: string, options?: { cursor?: number; limit?: number }): Promise<Turn[]>;
   listChannelParticipants(channelId: string): Promise<SessionParticipant[]>;
   listSessionParticipants(sessionId: string): Promise<SessionParticipant[]>;
+  getSessionSummary(sessionId: string): Promise<SessionSummary | null>;
   listAgentStates(sessionId: string): Promise<AgentChannelState[]>;
   createAgentStates(sessionId: string, participantIds: string[]): Promise<void>;
   incrementIdleTurnCount(sessionId: string, participantIds: string[]): Promise<void>;
@@ -436,14 +437,15 @@ export class SessionManager {
   private async crystallizeSession(session: ChatSession): Promise<string | undefined> {
     const participants = await this.repository.listSessionParticipants(session.id);
     const turns = await this.repository.listTurns(session.id, { limit: 200 });
-    const summary = buildCrystallizeSummary(session, participants, turns);
+    const foldedSummary = await this.repository.getSessionSummary(session.id);
+    const summary = buildCrystallizeSummary(session, participants, turns, foldedSummary);
     const companyId = participants[0]?.companyId;
 
     let paperclipIssueId: string | undefined;
     if (companyId && this.paperclipClient) {
       const issue = await this.paperclipClient.createIssue(companyId, {
         title: `[CHAT] ${session.channelId} / ${session.id.slice(0, 8)}`,
-        description: summary,
+        description: foldedSummary?.text ?? summary,
       });
       paperclipIssueId = issue.id;
     }
@@ -471,6 +473,7 @@ function buildCrystallizeSummary(
   session: ChatSession,
   participants: SessionParticipant[],
   turns: Turn[],
+  foldedSummary?: SessionSummary | null,
 ): string {
   const participantLines = participants.length
     ? participants.map((participant) => `- ${participant.participantType}: ${participant.participantId}`).join("\n")
@@ -485,6 +488,9 @@ function buildCrystallizeSummary(
     "",
     `Session: ${session.id}`,
     `Channel: ${session.channelId}`,
+    "",
+    "Summary:",
+    foldedSummary?.text ?? "No folded session summary was available.",
     "",
     "Participants:",
     participantLines,
