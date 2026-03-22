@@ -25,7 +25,7 @@ export function SummaryBar(props: {
             disabled={props.crystallizing || props.disabled}
             className="rounded-sm border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-medium text-stone-700 transition hover:bg-stone-100 disabled:cursor-not-allowed disabled:text-stone-400"
           >
-            {props.crystallizing ? "Crystallizing…" : "Crystallize"}
+            {props.crystallizing ? "Crystallizing…" : "Review crystallize"}
           </button>
         </div>
       </div>

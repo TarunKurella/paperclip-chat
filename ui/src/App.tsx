@@ -4,6 +4,7 @@ import { APP_NAME, CHAT_API_PATHS, type AgentChannelState, type Channel, type Ch
 import { cn } from "./lib/utils.js";
 import { Routes, Route, Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 import { ChatThread, type AgentPresence, type ThreadEntry } from "./components/ChatThread.js";
+import { CrystallizeCard } from "./components/CrystallizeCard.js";
 import { MessageInput, type MentionCandidate } from "./components/MessageInput.js";
 import { NotificationPanel } from "./components/NotificationPanel.js";
 import { Sidebar } from "./components/Sidebar.js";
@@ -39,6 +40,7 @@ function Shell() {
   const [newDmName, setNewDmName] = useState("");
   const [visibleEntryCount, setVisibleEntryCount] = useState(20);
   const [crystallizedIssueId, setCrystallizedIssueId] = useState<string | null>(null);
+  const [crystallizeConfirmOpen, setCrystallizeConfirmOpen] = useState(false);
   const [hasOlderHistory, setHasOlderHistory] = useState(false);
   const healthQuery = useQuery({
     queryKey: ["health"],
@@ -251,6 +253,7 @@ function Shell() {
     optimisticMessages[selectedChannel?.id ?? ""] ?? [],
     liveEntries,
   );
+  const latestDecisionEntry = [...previewEntries].reverse().find((entry) => entry.isDecision) ?? liveDecision;
   const mentionCandidates = buildMentionCandidates(sessionParticipantsQuery.data?.participants ?? [], presenceByAgent);
   const mentionSuggestions = readMentionSuggestions(draft, mentionCandidates);
   const previewsByChannel = Object.fromEntries(
@@ -669,7 +672,7 @@ function Shell() {
                 if (!selectedSessionId) {
                   return;
                 }
-                closeSessionMutation.mutate({ sessionId: selectedSessionId, crystallize: true });
+                setCrystallizeConfirmOpen(true);
               }}
             />
 
@@ -873,6 +876,27 @@ function Shell() {
           </div>
         </div>
       ) : null}
+      <CrystallizeCard
+        open={crystallizeConfirmOpen}
+        summaryText={sessionSummary?.text ?? null}
+        decisionText={latestDecisionEntry?.body ?? null}
+        crystallizing={closeSessionMutation.isPending}
+        disabled={!selectedSessionId || sessionClosed}
+        onCancel={() => setCrystallizeConfirmOpen(false)}
+        onConfirm={() => {
+          if (!selectedSessionId) {
+            return;
+          }
+          closeSessionMutation.mutate(
+            { sessionId: selectedSessionId, crystallize: true },
+            {
+              onSuccess: () => {
+                setCrystallizeConfirmOpen(false);
+              },
+            },
+          );
+        }}
+      />
     </main>
   );
 }
