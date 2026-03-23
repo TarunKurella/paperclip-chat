@@ -42,6 +42,21 @@ export class DebounceBuffer<TTurn extends DebouncedTurn> {
     });
   }
 
+  async enqueueNow(agentId: string, sessionId: string, turn: TTurn): Promise<void> {
+    debugDispatch("enqueue_now", { agentId, sessionId, turnId: turn.id });
+    const key = getBufferKey(agentId, sessionId);
+    const existing = this.buffers.get(key);
+
+    if (existing) {
+      clearTimeout(existing.timer);
+      existing.turns.push(turn);
+      await this.flushKey(key);
+      return;
+    }
+
+    await this.flushHandler(agentId, sessionId, [turn]);
+  }
+
   async flush(agentId: string, sessionId: string): Promise<void> {
     await this.flushKey(getBufferKey(agentId, sessionId));
   }

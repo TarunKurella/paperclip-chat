@@ -17,6 +17,7 @@ export interface AssemblePacketInput {
   kTokens?: number;
   packetBudget?: number;
   activeThreshold?: number;
+  preferForegroundFastPath?: boolean;
 }
 
 export interface PacketAssemblyResult {
@@ -32,7 +33,7 @@ export function assemblePacket(input: AssemblePacketInput): PacketAssemblyResult
   const contextFloorSeq = input.contextFloorSeq ?? 0;
   const effectiveAnchorSeq = Math.max(input.agentState.anchorSeq, contextFloorSeq);
   const deltaSinceAnchor = input.currentSeq - effectiveAnchorSeq;
-  const usedHotShortcut = deltaSinceAnchor <= activeThreshold;
+  const usedHotShortcut = input.preferForegroundFastPath || deltaSinceAnchor <= activeThreshold;
   const mode = input.agentState.status === "absent"
     ? "absent"
     : input.agentState.status === "active" || usedHotShortcut
@@ -43,6 +44,22 @@ export function assemblePacket(input: AssemblePacketInput): PacketAssemblyResult
     (turn) => turn.seq > effectiveAnchorSeq && turn.seq < input.triggeringTurn.seq,
   );
   const tailTurns = buildVerbatimTail(priorTurns, kTokens);
+  if (input.preferForegroundFastPath) {
+    const fastSections: string[] = [];
+    if (input.agentState.status === "absent" && input.bootstrapPrompt?.trim()) {
+      fastSections.push(input.bootstrapPrompt.trim());
+    }
+    if (tailTurns.length > 0) {
+      fastSections.push(formatTail(tailTurns));
+    }
+    fastSections.push(formatTriggeringMessage(input.senderName, input.agentName, input.triggeringTurn.content));
+    return {
+      mode,
+      usedHotShortcut,
+      text: fastSections.filter(Boolean).join("\n\n"),
+    };
+  }
+
   const tailStartSeq = tailTurns[0]?.seq ?? input.triggeringTurn.seq;
 
   if (mode === "active") {

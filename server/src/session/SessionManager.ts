@@ -68,6 +68,7 @@ export interface SessionHub {
 
 export interface AgentWakeupQueue {
   enqueue(agentId: string, sessionId: string, turn: Turn): void;
+  enqueueNow(agentId: string, sessionId: string, turn: Turn): Promise<void>;
 }
 
 export interface ChunkQueue {
@@ -356,13 +357,14 @@ export class SessionManager {
         )
         .map((participant) => participant.participantId);
       for (const agentId of dmAgents) {
-        this.debounce.enqueue(agentId, input.sessionId, turn);
+        await this.debounce.enqueueNow(agentId, input.sessionId, turn);
       }
       return turn;
     }
 
     const agentStates = await this.repository.listAgentStates(input.sessionId);
     const mentionedAgents = new Set(resolvedMentionedIds);
+    const useForegroundFastPath = resolvedMentionedIds.length === 1;
     for (const state of agentStates) {
       if (!mentionedAgents.has(state.participantId)) {
         continue;
@@ -371,7 +373,11 @@ export class SessionManager {
       if (nextState.status !== state.status || nextState.anchorSeq !== state.anchorSeq || nextState.idleTurnCount !== state.idleTurnCount) {
         await this.repository.saveAgentState(nextState);
       }
-      this.debounce.enqueue(state.participantId, input.sessionId, turn);
+      if (useForegroundFastPath) {
+        await this.debounce.enqueueNow(state.participantId, input.sessionId, turn);
+      } else {
+        this.debounce.enqueue(state.participantId, input.sessionId, turn);
+      }
     }
 
     const idleParticipants = agentStates

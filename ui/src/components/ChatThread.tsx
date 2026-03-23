@@ -207,6 +207,7 @@ function ThreadRow(props: { entry: ThreadEntry; streaming?: boolean }) {
       className={cn(
         "border-b border-stone-100 py-3 last:border-b-0",
         entry.isDecision ? "border-l-2 border-l-amber-400 pl-3" : "",
+        entry.kind === "human" ? "bg-neutral-100/60 -mx-4 px-4" : "",
       )}
     >
       <div className="flex items-center justify-between gap-3">

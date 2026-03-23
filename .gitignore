@@ -5,3 +5,4 @@ dist
 coverage
 ui/dist
 .paperclip/
+.paperclip-chat-runtime.json

@@ -9,11 +9,18 @@
   --radius: 0px;
 }
 
+html,
+body,
+#root {
+  height: 100%;
+}
+
 body {
   margin: 0;
   min-width: 320px;
   background: #ffffff;
   color: #111827;
+  overflow: hidden;
 }
 
 * {

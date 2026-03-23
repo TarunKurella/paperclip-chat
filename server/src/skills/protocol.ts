@@ -23,6 +23,8 @@ export const INLINE_CHAT_PROTOCOL = [
   "- If a request targets no specific participant, respond yourself instead of spraying @mentions.",
   "- If a human asks for multiple agents, coordinate in sequence with the minimum necessary @mentions.",
   "- When replying to a human in group chat, mention the human only if disambiguation is needed.",
+  "- Format code snippets with fenced Markdown code blocks and include a language when obvious.",
+  "- Format bullets and short structured answers as Markdown so the chat renderer can present them cleanly.",
 ].join("\n");
 
 export function readPaperclipChatSkill(): string {

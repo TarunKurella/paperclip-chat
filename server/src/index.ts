@@ -33,6 +33,7 @@ import { runLocalAgentCli } from "./subprocess/runLocalAgentCli.js";
 import { SubprocessManager } from "./subprocess/SubprocessManager.js";
 import { WakeupScaffoldManager } from "./wakeup/WakeupScaffoldManager.js";
 import { ChatWsHub } from "./ws/hub.js";
+import { RuntimeSettingsStore, type RuntimeSettings } from "./runtimeSettings.js";
 
 export interface ServerRuntime {
   app: Express;
@@ -41,6 +42,7 @@ export interface ServerRuntime {
 }
 
 export async function bootstrapServer(envSource: NodeJS.ProcessEnv = process.env): Promise<ServerRuntime> {
+  const runtimeSettings = new RuntimeSettingsStore(envSource);
   const env = readServiceAccountEnv(envSource);
   const paperclipClient = new PaperclipClient({
     baseUrl: env.paperclipApiUrl,
@@ -149,10 +151,10 @@ export async function bootstrapServer(envSource: NodeJS.ProcessEnv = process.env
   const subprocessManager = new SubprocessManager(
     presence,
     (channel, agentId, sessionId) => resolveChatWorkspace(channel, agentId, sessionId, paperclipClient),
-    (input) => runLocalAgentCli(input, envSource),
+    async (input) => runLocalAgentCli(input, await runtimeSettings.resolveEnv()),
     sessionRepository,
     hub,
-    envSource,
+    () => runtimeSettings.resolveEnv(),
   );
   dispatchCoordinator = new AgentDispatchCoordinator(
     sessionRepository,
@@ -207,6 +209,23 @@ export async function bootstrapServer(envSource: NodeJS.ProcessEnv = process.env
   app.get("/api/health", (_req, res) => {
     res.json({ status: "ok", paperclip: "connected", ws: "running" });
   });
+  app.get("/api/runtime-settings", authenticateMiddleware, requireAnyMiddleware, async (req, res) => {
+    const companyId = typeof req.query.companyId === "string" ? req.query.companyId : null;
+    const agentIds = typeof req.query.agentIds === "string"
+      ? req.query.agentIds.split(",").map((value) => value.trim()).filter(Boolean)
+      : [];
+    res.json(await runtimeSettings.buildSnapshot({ companyId, agentIds }));
+  });
+  app.put("/api/runtime-settings", authenticateMiddleware, requireHumanMiddleware, async (req, res) => {
+    const body = (req.body ?? {}) as Partial<RuntimeSettings>;
+    await runtimeSettings.updateSettings(body);
+    const companyId = typeof req.query.companyId === "string" ? req.query.companyId : null;
+    const agentIds = typeof req.query.agentIds === "string"
+      ? req.query.agentIds.split(",").map((value) => value.trim()).filter(Boolean)
+      : [];
+    res.json(await runtimeSettings.buildSnapshot({ companyId, agentIds }));
+  });
+  app.use(skillRoutes());
   app.use("/api", skillRoutes());
   app.use(
     "/api",

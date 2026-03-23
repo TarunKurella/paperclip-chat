@@ -42,6 +42,7 @@ function Shell() {
   const [newChannelOpen, setNewChannelOpen] = useState(false);
   const [newChannelName, setNewChannelName] = useState("");
   const [newChannelParticipantIds, setNewChannelParticipantIds] = useState<string[]>([]);
+  const [runtimeSettingsOpen, setRuntimeSettingsOpen] = useState(false);
   const [visibleEntryCount, setVisibleEntryCount] = useState(20);
   const [crystallizedIssueId, setCrystallizedIssueId] = useState<string | null>(null);
   const [crystallizeFeedback, setCrystallizeFeedback] = useState<string | null>(null);
@@ -263,6 +264,53 @@ function Shell() {
     enabled: Boolean(selectedSessionId),
     queryFn: async () =>
       requestJson<{ participants: SessionParticipant[] }>(`${CHAT_API_PATHS.SESSION(selectedSessionId!)}/participants`),
+  });
+  const selectedAgentParticipants = (sessionParticipantsQuery.data?.participants ?? []).filter(
+    (participant) => participant.participantType === "agent",
+  );
+  const runtimeSettingsQuery = useQuery({
+    queryKey: ["runtime-settings", companyId, selectedAgentParticipants.map((participant) => participant.participantId).join(",")],
+    enabled: runtimeSettingsOpen,
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (companyId) {
+        params.set("companyId", companyId);
+      }
+      if (selectedAgentParticipants.length > 0) {
+        params.set(
+          "agentIds",
+          selectedAgentParticipants.map((participant) => participant.participantId).join(","),
+        );
+      }
+      const suffix = params.toString();
+      return requestJson<RuntimeSettingsResponse>(`/api/runtime-settings${suffix ? `?${suffix}` : ""}`);
+    },
+  });
+  const saveRuntimeSettingsMutation = useMutation({
+    mutationFn: async (input: RuntimeSettingsFormValues) => {
+      const params = new URLSearchParams();
+      if (companyId) {
+        params.set("companyId", companyId);
+      }
+      if (selectedAgentParticipants.length > 0) {
+        params.set(
+          "agentIds",
+          selectedAgentParticipants.map((participant) => participant.participantId).join(","),
+        );
+      }
+      const suffix = params.toString();
+      return requestJson<RuntimeSettingsResponse>(`/api/runtime-settings${suffix ? `?${suffix}` : ""}`, {
+        method: "PUT",
+        body: JSON.stringify(input),
+      });
+    },
+    onSuccess: (result) => {
+      queryClient.setQueryData(
+        ["runtime-settings", companyId, selectedAgentParticipants.map((participant) => participant.participantId).join(",")],
+        result,
+      );
+      setRuntimeSettingsOpen(false);
+    },
   });
   const crystallizePreviewQuery = useQuery({
     queryKey: ["crystallize-preview", selectedSessionId],
@@ -547,7 +595,7 @@ function Shell() {
   }
 
   return (
-    <main className="flex min-h-screen flex-col bg-white text-neutral-950">
+    <main className="flex h-dvh flex-col overflow-hidden bg-white text-neutral-950">
         <header className="flex h-12 shrink-0 items-center justify-between border-b border-stone-200 px-4">
           <div className="flex items-center gap-3">
             <h1 className="text-sm font-bold text-stone-900">{APP_NAME}</h1>
@@ -578,8 +626,8 @@ function Shell() {
           </div>
         </header>
 
-        <div className="grid min-h-0 flex-1 lg:grid-cols-[240px_minmax(0,1fr)_280px]">
-          <div className="hidden border-r border-stone-200 lg:block">
+        <div className="grid min-h-0 flex-1 overflow-hidden lg:grid-cols-[240px_minmax(0,1fr)_280px]">
+          <div className="hidden min-h-0 overflow-hidden border-r border-stone-200 lg:block">
             <Sidebar
               channels={channels}
               selectedChannelId={selectedChannelId}
@@ -595,6 +643,7 @@ function Shell() {
                   navigate(`/channels/${channelId}${location.search}`);
                 })
               }
+              onOpenRuntimeSettings={() => setRuntimeSettingsOpen(true)}
               onCreateChannel={() => setNewChannelOpen(true)}
               onCreateDm={() => setNewDmOpen(true)}
             />
@@ -744,7 +793,7 @@ function Shell() {
             </div>
           </section>
 
-          <div className="hidden border-l border-stone-200 lg:block">
+          <div className="hidden min-h-0 overflow-hidden border-l border-stone-200 lg:block">
             <NotificationPanel
               notifications={notifications}
               selectedSessionId={selectedSessionId}
@@ -786,6 +835,10 @@ function Shell() {
                   navigate(`/channels/${channelId}${location.search}`);
                 })
               }
+              onOpenRuntimeSettings={() => {
+                setMobileSidebarOpen(false);
+                setRuntimeSettingsOpen(true);
+              }}
               onCreateChannel={() => {
                 setMobileSidebarOpen(false);
                 setNewChannelOpen(true);
@@ -825,6 +878,130 @@ function Shell() {
               }}
               onMarkRead={(notificationIds) => markNotificationsReadMutation.mutate(notificationIds)}
             />
+          </div>
+        </div>
+      ) : null}
+      {runtimeSettingsOpen ? (
+        <div className="fixed inset-0 z-50 bg-black/35 px-4 py-6">
+          <div className="mx-auto flex h-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-stone-200 px-5 py-4">
+              <div>
+                <h3 className="text-sm font-semibold text-stone-900">Runtime settings</h3>
+                <p className="mt-1 text-xs text-stone-500">
+                  Configure child-run overrides and inspect where chat resolves agent instructions.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRuntimeSettingsOpen(false)}
+                className="rounded-md px-2 py-1 text-sm text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-900"
+              >
+                Close
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-5 py-5">
+              {runtimeSettingsQuery.isLoading ? (
+                <p className="text-sm text-stone-500">Loading runtime settings…</p>
+              ) : runtimeSettingsQuery.isError || !runtimeSettingsQuery.data ? (
+                <p className="text-sm text-red-600">Could not load runtime settings.</p>
+              ) : (
+                <form
+                  className="space-y-6"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    const form = new FormData(event.currentTarget);
+                    saveRuntimeSettingsMutation.mutate({
+                      paperclipApiUrl: readNullableFormValue(form, "paperclipApiUrl"),
+                      paperclipHome: readNullableFormValue(form, "paperclipHome"),
+                      codexHome: readNullableFormValue(form, "codexHome"),
+                      agentInstructionsFile: readNullableFormValue(form, "agentInstructionsFile"),
+                    });
+                  }}
+                >
+                  <section className="space-y-4">
+                    <div>
+                      <p className="text-[11px] font-medium uppercase tracking-widest text-stone-400">Editable overrides</p>
+                      <p className="mt-1 text-xs text-stone-500">
+                        These values override the local child runtime used for agent chat runs.
+                      </p>
+                    </div>
+                    <RuntimeField
+                      name="paperclipApiUrl"
+                      label="PAPERCLIP_API_URL"
+                      help="Passed into local agent subprocesses. Leave blank to use the server default."
+                      defaultValue={runtimeSettingsQuery.data.settings.paperclipApiUrl ?? ""}
+                    />
+                    <RuntimeField
+                      name="paperclipHome"
+                      label="PAPERCLIP_HOME"
+                      help="Base Paperclip home for agent workspace and managed company state."
+                      defaultValue={runtimeSettingsQuery.data.settings.paperclipHome ?? ""}
+                    />
+                    <RuntimeField
+                      name="codexHome"
+                      label="CODEX_HOME"
+                      help="Shared Codex home used to seed the managed company Codex runtime."
+                      defaultValue={runtimeSettingsQuery.data.settings.codexHome ?? ""}
+                    />
+                    <RuntimeField
+                      name="agentInstructionsFile"
+                      label="CHAT_AGENT_INSTRUCTIONS_FILE"
+                      help="Optional hard override for AGENTS.md. If empty, chat resolves the per-agent file automatically."
+                      defaultValue={runtimeSettingsQuery.data.settings.agentInstructionsFile ?? ""}
+                    />
+                  </section>
+
+                  <section className="space-y-3">
+                    <div>
+                      <p className="text-[11px] font-medium uppercase tracking-widest text-stone-400">Resolved runtime</p>
+                      <p className="mt-1 text-xs text-stone-500">Derived values the current server will use for new local child runs.</p>
+                    </div>
+                    <ResolvedRow label="Resolved Paperclip API" value={runtimeSettingsQuery.data.resolved.paperclipApiUrl} />
+                    <ResolvedRow label="Resolved Paperclip home" value={runtimeSettingsQuery.data.resolved.paperclipHome} />
+                    <ResolvedRow label="Resolved shared Codex home" value={runtimeSettingsQuery.data.resolved.codexHome} />
+                    <ResolvedRow label="Managed company Codex home" value={runtimeSettingsQuery.data.resolved.managedCodexHome} />
+                    <ResolvedRow label="Instructions path template" value={runtimeSettingsQuery.data.resolved.instructionsPathTemplate} />
+                  </section>
+
+                  <section className="space-y-3">
+                    <div>
+                      <p className="text-[11px] font-medium uppercase tracking-widest text-stone-400">Current session agents</p>
+                      <p className="mt-1 text-xs text-stone-500">
+                        Where AGENTS.md resolves for the agents in this open chat.
+                      </p>
+                    </div>
+                    {runtimeSettingsQuery.data.agents.length === 0 ? (
+                      <p className="rounded-xl border border-dashed border-stone-200 px-4 py-3 text-sm text-stone-500">
+                        Open a chat with one or more agents to inspect their resolved instructions path here.
+                      </p>
+                    ) : (
+                      <div className="space-y-2">
+                        {runtimeSettingsQuery.data.agents.map((agent) => (
+                          <ResolvedRow
+                            key={agent.agentId}
+                            label={resolveParticipantName(agent.agentId, participantNames)}
+                            value={agent.instructionsFilePath ?? "No AGENTS.md found for this agent."}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </section>
+
+                  <div className="flex items-center justify-between border-t border-stone-200 pt-4">
+                    <p className="text-xs text-stone-500">
+                      `AGENT_HOME` and `PAPERCLIP_WORKSPACE_CWD` stay per-run and are derived from the resolved workspace.
+                    </p>
+                    <button
+                      type="submit"
+                      disabled={saveRuntimeSettingsMutation.isPending}
+                      className="rounded-md bg-stone-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-stone-700 disabled:bg-stone-300"
+                    >
+                      {saveRuntimeSettingsMutation.isPending ? "Saving…" : "Save"}
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
           </div>
         </div>
       ) : null}
@@ -1385,6 +1562,68 @@ function readMentionedIds(draft: string, candidates: MentionCandidate[]) {
 
 function slugifyMentionCandidate(value: string) {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "participant";
+}
+
+interface RuntimeSettingsFormValues {
+  paperclipApiUrl: string | null;
+  paperclipHome: string | null;
+  codexHome: string | null;
+  agentInstructionsFile: string | null;
+}
+
+interface RuntimeSettingsResponse {
+  settings: RuntimeSettingsFormValues;
+  resolved: {
+    paperclipApiUrl: string;
+    paperclipHome: string;
+    codexHome: string;
+    managedCodexHome: string;
+    agentInstructionsFile: string | null;
+    instructionsPathTemplate: string;
+  };
+  agents: Array<{
+    agentId: string;
+    companyId: string | null;
+    instructionsFilePath: string | null;
+  }>;
+}
+
+function RuntimeField(props: {
+  name: keyof RuntimeSettingsFormValues;
+  label: string;
+  help: string;
+  defaultValue: string;
+}) {
+  return (
+    <label className="block space-y-1.5">
+      <span className="text-xs font-medium text-stone-700">{props.label}</span>
+      <input
+        name={props.name}
+        defaultValue={props.defaultValue}
+        placeholder="Use default"
+        className="w-full rounded-md border border-stone-200 px-3 py-2 text-sm text-stone-900 outline-none transition-colors focus:border-stone-400"
+      />
+      <span className="text-xs text-stone-500">{props.help}</span>
+    </label>
+  );
+}
+
+function ResolvedRow(props: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-stone-200 bg-stone-50 px-4 py-3">
+      <p className="text-[11px] font-medium uppercase tracking-widest text-stone-400">{props.label}</p>
+      <p className="mt-1 break-all text-sm text-stone-700">{props.value}</p>
+    </div>
+  );
+}
+
+function readNullableFormValue(form: FormData, key: keyof RuntimeSettingsFormValues): string | null {
+  const value = form.get(key);
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
 }
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {

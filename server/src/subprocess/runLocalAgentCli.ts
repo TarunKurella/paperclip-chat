@@ -15,6 +15,8 @@ const chatPromptPrefix = [
   "Do not only print a final answer to stdout.",
   "This is a persistent conversation surface. Continue the room naturally instead of resetting into a fresh assistant intro on each turn.",
   "Prefer direct collaboration, decisions, questions, or handoffs over generic capability summaries.",
+  "When you include code, wrap it in fenced Markdown code blocks with a language tag when possible.",
+  "When you include structured guidance, prefer Markdown bullets or short sections so the chat UI renders it clearly.",
 ].join("\n");
 
 export async function runLocalAgentCli(input: RunCliInput, envSource: NodeJS.ProcessEnv = process.env): Promise<SubprocessRunResult> {
@@ -137,7 +139,7 @@ async function loadAgentInstructionsPrefix(
   env: Record<string, string>,
   envSource: NodeJS.ProcessEnv,
 ): Promise<string> {
-  const instructionsFilePath = await resolveInstructionsFilePath(env, envSource);
+  const instructionsFilePath = await resolveAgentInstructionsFilePath(env, envSource);
   if (!instructionsFilePath) {
     return "";
   }
@@ -160,7 +162,7 @@ async function loadAgentInstructionsPrefix(
   }
 }
 
-async function resolveInstructionsFilePath(
+export async function resolveAgentInstructionsFilePath(
   env: Record<string, string>,
   envSource: NodeJS.ProcessEnv,
 ): Promise<string | null> {

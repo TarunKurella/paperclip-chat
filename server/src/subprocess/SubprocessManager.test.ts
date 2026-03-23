@@ -139,6 +139,79 @@ describe("SubprocessManager", () => {
     vi.unstubAllGlobals();
   });
 
+  it("falls back to a cold run when a stored resume id is stale", async () => {
+    const queue = { flush: vi.fn() };
+    const presence = new PresenceStateMachine(queue);
+    presence.updateFromPaperclip("agent-1", "idle");
+
+    const runner = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("resume session not found"))
+      .mockResolvedValueOnce({
+        cliSessionId: "fresh-1",
+        actualInputTokens: 4,
+        outputTokens: 6,
+      });
+    const stateStore = { saveAgentState: vi.fn().mockResolvedValue(undefined) };
+    const manager = new SubprocessManager(
+      presence,
+      vi.fn().mockResolvedValue({ cwd: "/tmp/workspace", sessionPath: "/tmp/session" }),
+      runner,
+      { ...stateStore, listTurns: vi.fn().mockResolvedValue([]) },
+      { broadcast: vi.fn() },
+      { CHAT_TOKEN_SECRET: "secret", CHAT_API_URL: "http://127.0.0.1:4011" },
+    );
+
+    await manager.run(makeRequest({ adapterType: "claude_local", cliSessionId: "stale-1" }));
+
+    expect(runner).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        args: ["--print", "-", "--output-format", "stream-json", "--verbose", "--resume", "stale-1"],
+      }),
+    );
+    expect(runner).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        args: ["--print", "-", "--output-format", "stream-json", "--verbose"],
+      }),
+    );
+    expect(stateStore.saveAgentState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cliSessionId: "fresh-1",
+        tokensThisSession: 10,
+      }),
+    );
+  });
+
+  it("clears a stale resume id if the cold retry succeeds without returning a new session id", async () => {
+    const queue = { flush: vi.fn() };
+    const presence = new PresenceStateMachine(queue);
+    presence.updateFromPaperclip("agent-1", "idle");
+
+    const stateStore = { saveAgentState: vi.fn().mockResolvedValue(undefined) };
+    const manager = new SubprocessManager(
+      presence,
+      vi.fn().mockResolvedValue({ cwd: "/tmp/workspace", sessionPath: "/tmp/session" }),
+      vi
+        .fn()
+        .mockRejectedValueOnce(new Error("invalid resume session"))
+        .mockResolvedValueOnce({ actualInputTokens: 2, outputTokens: 3 }),
+      { ...stateStore, listTurns: vi.fn().mockResolvedValue([]) },
+      { broadcast: vi.fn() },
+      { CHAT_TOKEN_SECRET: "secret", CHAT_API_URL: "http://127.0.0.1:4011" },
+    );
+
+    await manager.run(makeRequest({ adapterType: "codex_local", cliSessionId: "stale-codex" }));
+
+    expect(stateStore.saveAgentState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cliSessionId: null,
+        tokensThisSession: 5,
+      }),
+    );
+  });
+
   it("defaults CHAT_API_URL to the local chat server instead of Paperclip API url", async () => {
     const queue = { flush: vi.fn() };
     const presence = new PresenceStateMachine(queue);

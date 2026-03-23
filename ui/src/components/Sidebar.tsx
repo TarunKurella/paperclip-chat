@@ -17,6 +17,7 @@ export function Sidebar(props: {
   usingFallbackChannels: boolean;
   canCreateChannel: boolean;
   canCreateDm: boolean;
+  onOpenRuntimeSettings(): void;
   onSelectChannel(channelId: string): void;
   onCreateChannel(): void;
   onCreateDm(): void;
@@ -127,6 +128,15 @@ export function Sidebar(props: {
             </div>
           </section>
         ))}
+      </div>
+      <div className="border-t border-stone-200 px-3 py-3">
+        <button
+          type="button"
+          onClick={props.onOpenRuntimeSettings}
+          className="w-full rounded-md border border-stone-200 px-3 py-2 text-left text-[12px] font-medium text-stone-600 transition-colors hover:border-stone-300 hover:text-stone-900"
+        >
+          Runtime settings
+        </button>
       </div>
     </aside>
   );

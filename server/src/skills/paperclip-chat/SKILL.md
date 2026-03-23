@@ -59,6 +59,8 @@ curl -H "Authorization: Bearer $CHAT_API_TOKEN" "$CHAT_API_URL/api/channels?comp
 - If the request is for you, answer it directly instead of routing it to someone else.
 - If the human wants collaboration from several agents, coordinate with the fewest necessary `@mentions` in the clearest order.
 - In group chat, mention a human only when needed for disambiguation or direct handoff.
+- When sharing code, always use fenced Markdown code blocks such as ```java.
+- When sharing short structured guidance, prefer Markdown bullets or short sections over plain text walls.
 - Keep chat for live coordination. Use Paperclip issue comments for durable task logs.
 
 ## Limits

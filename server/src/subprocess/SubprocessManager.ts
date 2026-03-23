@@ -18,6 +18,12 @@ export interface SubprocessRunResult {
   stream?: SubprocessStreamEvent[];
 }
 
+interface CliInvocationResult {
+  result: SubprocessRunResult;
+  resumed: boolean;
+  reusedSessionId: string | null;
+}
+
 export interface RunCliInput {
   adapterType: string;
   cwd: string;
@@ -67,10 +73,11 @@ export class SubprocessManager {
     private readonly runCli: CliRunner,
     private readonly stateStore: RunStateStore,
     private readonly hub: StreamHub,
-    private readonly env: NodeJS.ProcessEnv = process.env,
+    private readonly env: NodeJS.ProcessEnv | (() => Promise<NodeJS.ProcessEnv>) = process.env,
   ) {}
 
   async run(request: SpawnRequest): Promise<{ status: "queued" | "completed" }> {
+    const env = await this.resolveEnv();
     const allowDirectDmSpawn = request.channel.type === "dm";
     debugDispatch("subprocess.run.start", {
       agentId: request.agentId,
@@ -113,35 +120,23 @@ export class SubprocessManager {
             sessionId: request.sessionId,
             companyId: request.channel.companyId,
           },
-          this.env,
+          env,
         );
-        const cliResult = await this.runCli({
-          adapterType: request.adapterType,
-          cwd: workspace.cwd,
-          args: buildArgs(request.adapterType, request.cliSessionId),
-          env: {
-            CHAT_API_URL: resolveChatApiUrl(this.env),
-            CHAT_SESSION_ID: request.sessionId,
-            CHAT_API_TOKEN: token,
-            PAPERCLIP_API_URL: this.env.PAPERCLIP_API_URL ?? "",
-            PAPERCLIP_AGENT_ID: request.agentId,
-            PAPERCLIP_AGENT_NAME: request.agentName ?? "",
-            PAPERCLIP_COMPANY_ID: request.channel.companyId,
-            PAPERCLIP_WORKSPACE_CWD: workspace.cwd,
-            AGENT_HOME: workspace.cwd,
-            CODEX_HOME: request.adapterType === "codex_local"
-              ? await prepareManagedCodexHome(this.env, request.channel.companyId)
-              : resolveManagedCodexHomeDir(this.env, request.channel.companyId),
-            PAPERCLIP_WAKE_REASON: "chat_message",
-            PAPERCLIP_WAKE_COMMENT_ID: request.triggeringTurn.id,
-          },
-          stdin: request.prompt,
+        const cliInvocation = await runWithResumeFallback({
+          request,
+          workspace,
+          token,
+          env,
+          runCli: this.runCli,
         });
+        const cliResult = cliInvocation.result;
         debugDispatch("subprocess.run.cli_result", {
           agentId: request.agentId,
           sessionId: request.sessionId,
           streamCount: cliResult.stream?.length ?? 0,
           cliSessionId: cliResult.cliSessionId ?? null,
+          resumed: cliInvocation.resumed,
+          reusedSessionId: cliInvocation.reusedSessionId,
         });
 
         const fallbackText = (cliResult.stream ?? [])
@@ -162,7 +157,7 @@ export class SubprocessManager {
               textLength: fallbackText.length,
             });
             await postFallbackTurn(
-              resolveChatApiUrl(this.env),
+              resolveChatApiUrl(env),
               request.sessionId,
               token,
               fallbackText,
@@ -185,7 +180,7 @@ export class SubprocessManager {
         const nextState = transitionOnCompletion(request.agentState, request.currentSeq);
         await this.stateStore.saveAgentState({
           ...nextState,
-          cliSessionId: cliResult.cliSessionId ?? request.cliSessionId ?? null,
+          cliSessionId: cliResult.cliSessionId ?? cliInvocation.reusedSessionId ?? null,
           cliSessionPath: cliResult.cliSessionPath ?? workspace.sessionPath ?? request.agentState.cliSessionPath ?? null,
           tokensThisSession: (cliResult.actualInputTokens ?? 0) + (cliResult.outputTokens ?? 0),
         });
@@ -222,6 +217,10 @@ export class SubprocessManager {
 
     await runPromise;
     return { status: "completed" };
+  }
+
+  private async resolveEnv(): Promise<NodeJS.ProcessEnv> {
+    return typeof this.env === "function" ? this.env() : this.env;
   }
 }
 
@@ -283,4 +282,91 @@ function buildArgs(adapterType: string, cliSessionId?: string | null): string[] 
     "--verbose",
     ...(cliSessionId ? ["--resume", cliSessionId] : []),
   ];
+}
+
+async function runWithResumeFallback({
+  request,
+  workspace,
+  token,
+  env,
+  runCli,
+}: {
+  request: SpawnRequest;
+  workspace: WorkspaceResolution;
+  token: string;
+  env: NodeJS.ProcessEnv;
+  runCli: CliRunner;
+}): Promise<CliInvocationResult> {
+  const baseEnv = await buildCliEnv(request, workspace, token, env);
+  const resumeId = request.cliSessionId?.trim() || null;
+
+  debugDispatch("subprocess.run.mode", {
+    agentId: request.agentId,
+    sessionId: request.sessionId,
+    adapterType: request.adapterType,
+    mode: resumeId ? "warm" : "cold",
+    cliSessionId: resumeId,
+  });
+
+  const invoke = (cliSessionId?: string | null) =>
+    runCli({
+      adapterType: request.adapterType,
+      cwd: workspace.cwd,
+      args: buildArgs(request.adapterType, cliSessionId),
+      env: baseEnv,
+      stdin: request.prompt,
+    });
+
+  if (!resumeId) {
+    return { result: await invoke(null), resumed: false, reusedSessionId: null };
+  }
+
+  try {
+    return { result: await invoke(resumeId), resumed: true, reusedSessionId: resumeId };
+  } catch (error) {
+    if (!isRecoverableResumeError(error)) {
+      throw error;
+    }
+
+    debugDispatch("subprocess.run.resume_recover", {
+      agentId: request.agentId,
+      sessionId: request.sessionId,
+      adapterType: request.adapterType,
+      staleCliSessionId: resumeId,
+      message: error instanceof Error ? error.message : String(error),
+    });
+
+    return { result: await invoke(null), resumed: false, reusedSessionId: null };
+  }
+}
+
+async function buildCliEnv(
+  request: SpawnRequest,
+  workspace: WorkspaceResolution,
+  token: string,
+  env: NodeJS.ProcessEnv,
+): Promise<Record<string, string>> {
+  return {
+    CHAT_API_URL: resolveChatApiUrl(env),
+    CHAT_SESSION_ID: request.sessionId,
+    CHAT_API_TOKEN: token,
+    PAPERCLIP_API_URL: env.PAPERCLIP_API_URL ?? "",
+    PAPERCLIP_AGENT_ID: request.agentId,
+    PAPERCLIP_AGENT_NAME: request.agentName ?? "",
+    PAPERCLIP_COMPANY_ID: request.channel.companyId,
+    PAPERCLIP_WORKSPACE_CWD: workspace.cwd,
+    AGENT_HOME: workspace.cwd,
+    CODEX_HOME: request.adapterType === "codex_local"
+      ? await prepareManagedCodexHome(env, request.channel.companyId)
+      : resolveManagedCodexHomeDir(env, request.channel.companyId),
+    PAPERCLIP_WAKE_REASON: "chat_message",
+    PAPERCLIP_WAKE_COMMENT_ID: request.triggeringTurn.id,
+  };
+}
+
+function isRecoverableResumeError(error: unknown): boolean {
+  const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  const mentionsResumeState = ["resume", "session", "conversation", "thread"].some((token) => message.includes(token));
+  const indicatesInvalidState = ["not found", "no such", "missing", "invalid", "expired"].some((token) => message.includes(token));
+  return mentionsResumeState && indicatesInvalidState;
 }

@@ -21,7 +21,7 @@ describe("SessionManager", () => {
       type: CHAT_EVENT_TYPES.CHAT_MESSAGE,
       payload: { turn },
     });
-    expect(fixture.debounce.enqueue).toHaveBeenCalledWith("agent-1", "session-1", turn);
+    expect(fixture.debounce.enqueueNow).toHaveBeenCalledWith("agent-1", "session-1", turn);
   });
 
   it("resolves agent-authored @mentions from participant handles in group chat", async () => {
@@ -58,7 +58,43 @@ describe("SessionManager", () => {
         mentionedIds: ["agent-2"],
       }),
     );
+    expect(fixture.debounce.enqueueNow).toHaveBeenCalledWith("agent-2", "session-1", turn);
+  });
+
+  it("keeps batched enqueue behavior for multi-agent mentions in group chat", async () => {
+    const fixture = createFixture({
+      participants: [
+        { participantId: "human-1", participantType: "human", companyId: "company-1", displayName: "Board", mentionLabel: "board" },
+        { participantId: "agent-1", participantType: "agent", companyId: "company-1", displayName: "tester", mentionLabel: "tester" },
+      ],
+      companyAgents: [
+        { id: "agent-1", companyId: "company-1", name: "tester", urlKey: "tester" },
+        { id: "agent-2", companyId: "company-1", name: "Singer", urlKey: "singer" },
+        { id: "agent-3", companyId: "company-1", name: "CEO", urlKey: "ceo" },
+      ],
+      agentStates: [
+        makeAgentState("agent-1"),
+        makeAgentState("agent-2"),
+        makeAgentState("agent-3"),
+      ],
+      turn: {
+        ...makeTurn(),
+        fromParticipantId: "human-1",
+        content: "@Singer @CEO weigh in",
+      },
+    });
+
+    const turn = await fixture.manager.processTurn({
+      sessionId: "session-1",
+      fromParticipantId: "human-1",
+      fromParticipantType: "human",
+      content: "@Singer @CEO weigh in",
+      mentionedIds: [],
+    });
+
+    expect(fixture.debounce.enqueueNow).not.toHaveBeenCalled();
     expect(fixture.debounce.enqueue).toHaveBeenCalledWith("agent-2", "session-1", turn);
+    expect(fixture.debounce.enqueue).toHaveBeenCalledWith("agent-3", "session-1", turn);
   });
 
   it("opens a session and creates agent states for agent participants", async () => {
@@ -322,7 +358,7 @@ describe("SessionManager", () => {
     });
 
     expect(fixture.chunkQueue.enqueue).toHaveBeenCalledWith("session-1", "dm");
-    expect(fixture.debounce.enqueue).toHaveBeenCalledWith("agent-1", "session-1", fixture.turn);
+    expect(fixture.debounce.enqueueNow).toHaveBeenCalledWith("agent-1", "session-1", fixture.turn);
     expect(fixture.repository.incrementIdleTurnCount).not.toHaveBeenCalled();
   });
 
@@ -524,6 +560,7 @@ function createFixture(overrides: Partial<FixtureOptions> = {}) {
   };
   const debounce = {
     enqueue: vi.fn(),
+    enqueueNow: vi.fn().mockResolvedValue(undefined),
   };
   const chunkQueue = {
     enqueue: vi.fn(),

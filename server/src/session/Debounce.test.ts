@@ -83,6 +83,30 @@ describe("DebounceBuffer", () => {
     await vi.runAllTimersAsync();
     expect(flush).toHaveBeenCalledTimes(1);
   });
+
+  it("flushes immediately with enqueueNow", async () => {
+    const flush = vi.fn();
+    const buffer = new DebounceBuffer(flush, 800);
+
+    await buffer.enqueueNow("agent-1", "session-1", makeTurn("turn-1", "session-1"));
+
+    expect(flush).toHaveBeenCalledTimes(1);
+    expect(flush).toHaveBeenCalledWith("agent-1", "session-1", [makeTurn("turn-1", "session-1")]);
+  });
+
+  it("flushes buffered turns immediately when enqueueNow arrives", async () => {
+    const flush = vi.fn();
+    const buffer = new DebounceBuffer(flush, 800);
+
+    buffer.enqueue("agent-1", "session-1", makeTurn("turn-1", "session-1"));
+    await buffer.enqueueNow("agent-1", "session-1", makeTurn("turn-2", "session-1"));
+
+    expect(flush).toHaveBeenCalledTimes(1);
+    expect(flush).toHaveBeenCalledWith("agent-1", "session-1", [
+      makeTurn("turn-1", "session-1"),
+      makeTurn("turn-2", "session-1"),
+    ]);
+  });
 });
 
 function makeTurn(id: string, sessionId: string) {
