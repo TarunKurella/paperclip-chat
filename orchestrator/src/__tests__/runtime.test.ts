@@ -147,7 +147,7 @@ function bead(identifier: string, priority: number, createdAt: string): Normaliz
 
 function makeConfig(root: string): ResolvedWorkflowConfig {
   return {
-    workflowPath: "/repo/WORKFLOW.md",
+    workflowPath: path.join(root, "WORKFLOW.md"),
     beads: {
       command: "bd",
       readyArgs: ["ready", "--json"],

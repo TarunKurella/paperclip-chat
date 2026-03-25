@@ -236,7 +236,7 @@ describe("SessionManager", () => {
 
     expect(fixture.paperclipClient.createIssue).toHaveBeenCalledWith(
       "company-1",
-      expect.objectContaining({ title: expect.stringContaining("[CHAT]"), description: "Folded summary for crystallize" }),
+      expect.objectContaining({ title: expect.stringContaining("[CHAT]"), description: expect.stringContaining("Folded summary for crystallize") }),
     );
     expect(fixture.paraMemoryWriter.write).toHaveBeenCalledWith(
       ["agent-1"],
@@ -285,7 +285,7 @@ describe("SessionManager", () => {
     expect(fixture.paperclipClient.createIssue).toHaveBeenCalledWith(
       "company-1",
       expect.objectContaining({
-        description: expect.stringContaining("No folded session summary was available."),
+        description: expect.stringContaining("No folded summary was available yet"),
       }),
     );
   });
@@ -520,7 +520,9 @@ function createFixture(overrides: Partial<FixtureOptions> = {}) {
   const repository = {
     createSession: vi.fn().mockResolvedValue(session ?? makeSession()),
     closeSession: vi.fn().mockResolvedValue(session),
-    checkpointSession: vi.fn().mockResolvedValue(session),
+    checkpointSession: vi.fn().mockImplementation(async (input: { sessionId: string; lastCrystallizedSeq: number; lastCrystallizedIssueId: string | null }) =>
+      session ? { ...session, lastCrystallizedSeq: input.lastCrystallizedSeq, lastCrystallizedIssueId: input.lastCrystallizedIssueId } : null
+    ),
     getSession: vi.fn().mockResolvedValue(session),
     listActiveSessions: vi.fn().mockResolvedValue(overrides.sessions ?? (session ? [session] : [])),
     getTokensSinceLastChunk: vi.fn().mockResolvedValue(overrides.tokensSinceLastChunk ?? 0),

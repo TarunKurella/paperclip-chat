@@ -1,3 +1,4 @@
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -27,16 +28,18 @@ describe("resolveChatWorkspace", () => {
 
   it("prefers the Paperclip-managed workspace layout when it exists", async () => {
     const agentId = "8c180a4d-a7ac-4a0f-8739-c572b3f60215";
-    const result = await resolveChatWorkspace(
-      baseChannel,
-      agentId,
-      "session-1",
-      mockPaperclipClient(),
-    );
-
-    expect(result.cwd).toBe(
-      path.join(os.homedir(), ".paperclip", "instances", "default", "workspaces", agentId),
-    );
+    const root = await mkdtemp(path.join(os.tmpdir(), "paperclip-resolver-"));
+    const managedWorkspace = path.join(root, ".paperclip", "instances", "default", "workspaces", agentId);
+    await mkdir(managedWorkspace, { recursive: true });
+    const origHome = process.env.HOME;
+    process.env.HOME = root;
+    try {
+      const result = await resolveChatWorkspace(baseChannel, agentId, "session-1", mockPaperclipClient());
+      expect(result.cwd).toBe(managedWorkspace);
+    } finally {
+      process.env.HOME = origHome;
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("uses project workspace when available", async () => {

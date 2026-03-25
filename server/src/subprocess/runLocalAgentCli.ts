@@ -21,7 +21,7 @@ const chatPromptPrefix = [
 
 export async function runLocalAgentCli(input: RunCliInput, envSource: NodeJS.ProcessEnv = process.env): Promise<SubprocessRunResult> {
   const command = resolveCommand(input.adapterType, envSource);
-  const runtime = await prepareRuntime(input);
+  const runtime = await prepareRuntime(input, envSource);
 
   return new Promise<SubprocessRunResult>((resolve, reject) => {
     const child = spawn(command, runtime.args, {
@@ -85,14 +85,14 @@ function debugCli(stream: "stdout" | "stderr", payload: Record<string, unknown>)
   console.log(`[chat-cli] ${stream}`, payload);
 }
 
-async function prepareRuntime(input: RunCliInput): Promise<{
+async function prepareRuntime(input: RunCliInput, envSource: NodeJS.ProcessEnv): Promise<{
   args: string[];
   env: Record<string, string>;
   stdin: string;
   cleanupDir?: string;
 }> {
   const identityPrefix = buildAgentIdentityPrefix(input.env);
-  const instructionsPrefix = await loadAgentInstructionsPrefix(input.env, process.env);
+  const instructionsPrefix = await loadAgentInstructionsPrefix(input.env, envSource);
   const promptPrefix = `${identityPrefix}${instructionsPrefix}`;
 
   if (!isChatSessionEnv(input.env)) {
